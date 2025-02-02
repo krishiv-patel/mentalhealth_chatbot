@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ChatMessage } from '../components/ChatMessage';
 import { ChatInput } from '../components/ChatInput';
 import { Layout } from '../components/Layout';
@@ -6,12 +6,23 @@ import { useChatStore } from '../store/useChatStore';
 import { Button } from '../components/ui/Button';
 import { Trash2, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { supabase } from '../lib/supabase';
 
 export const Chat: React.FC = () => {
   const { messages, addMessage, deleteMessage, clearHistory, fetchMessages, loading } =
     useChatStore();
-
+  const [userEmail, setUserEmail] = useState<string | null>(null)
   useEffect(() => {
+    setTimeout(() => {}, 300);
+    const fetchUser = async () => {
+      const { data, error } = await supabase.auth.getUser();
+      if (error) {
+        console.error('Error fetching user:', error);
+      } else {
+        setUserEmail(data.user?.email?.split('@')[0] || null);
+      }
+    };
+    fetchUser();
     fetchMessages();
   }, [fetchMessages]);
 
@@ -26,11 +37,25 @@ export const Chat: React.FC = () => {
     }, 1000);
   };
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good Morning';
+    if (hour < 18) return 'Good Afternoon';
+    return 'Good Evening';
+  };
+
   return (
     <Layout>
       <div className="max-w-4xl mx-auto">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-foreground/80">Your Conversation</h2>
+          <h2 className="text-3xl font-semibold text-foreground/80">
+            <motion.span
+              initial={{ x: -200, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              transition={{ duration: 0.8, ease: 'easeOut' }}>
+            {getGreeting()} {userEmail}!
+            </motion.span>
+          </h2>
           <Button
             variant="destructive"
             size="sm"
