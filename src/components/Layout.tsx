@@ -3,13 +3,14 @@ import { useAuthStore } from '../store/useAuthStore';
 import { Moon, Sun, LogOut, Brain } from 'lucide-react';
 import { Button } from './ui/Button';
 import { motion, AnimatePresence } from 'framer-motion';
+import Profile from './Profile';
 
 interface LayoutProps {
   children: React.ReactNode;
 }
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
-  const { signOut } = useAuthStore();
+  const { signOut,user } = useAuthStore();
   const [darkMode, setDarkMode] = React.useState(
     window.matchMedia('(prefers-color-scheme: dark)').matches
   );
@@ -83,6 +84,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                   <LogOut className="h-5 w-5 transition-transform duration-300 group-hover:translate-x-1" />
                 </Button>
               </motion.div>
+              <Profile user={user}/>
             </div>
           </div>
         </div>
