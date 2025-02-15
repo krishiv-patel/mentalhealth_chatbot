@@ -1,40 +1,30 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { ChatMessage } from '../components/ChatMessage';
 import { ChatInput } from '../components/ChatInput';
 import { Layout } from '../components/Layout';
 import { useChatStore } from '../store/useChatStore';
+import { useProfileStore } from '../store/useProfileStore';
 import { Button } from '../components/ui/Button';
 import { Trash2, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { supabase } from '../lib/supabase';
 
 export const Chat: React.FC = () => {
   const { messages, addMessage, deleteMessage, clearHistory, fetchMessages, loading } =
     useChatStore();
-  const [userEmail, setUserEmail] = useState<string | null>(null)
+  const { profile, fetchProfile } = useProfileStore();
+
   useEffect(() => {
-    setTimeout(() => {}, 300);
-    const fetchUser = async () => {
-      const { data, error } = await supabase.auth.getUser();
-      if (error) {
-        console.error('Error fetching user:', error);
-      } else {
-        setUserEmail(data.user?.email?.split('@')[0] || null);
-      }
-    };
-    fetchUser();
     fetchMessages();
-  }, [fetchMessages]);
+    fetchProfile();
+  }, [fetchMessages, fetchProfile]);
 
   const handleSend = async (content: string) => {
-    await addMessage({ role: 'user', content });
-    // Simulate AI response - Replace with actual LM Studio API call
-    setTimeout(() => {
-      addMessage({
-        role: 'assistant',
-        content: 'This is a placeholder response. Integration with LM Studio API is required.',
-      });
-    }, 1000);
+    try {
+      await addMessage({ role: 'user', content });
+    } catch (error) {
+      console.error('Error sending message:', error);
+      // You might want to show an error message to the user here
+    }
   };
 
   const getGreeting = () => {
@@ -53,7 +43,7 @@ export const Chat: React.FC = () => {
               initial={{ x: -200, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
               transition={{ duration: 0.8, ease: 'easeOut' }}>
-            {getGreeting()} {userEmail}!
+              {getGreeting()} {profile?.username || 'User'}!
             </motion.span>
           </h2>
           <Button

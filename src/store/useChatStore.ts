@@ -1,12 +1,7 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: string;
-}
+import { getChatCompletion } from '../lib/lmstudio';
+import type { Message } from '../types';
 
 interface ChatState {
   messages: Message[];
@@ -22,23 +17,54 @@ export const useChatStore = create<ChatState>((set, get) => ({
   loading: false,
   addMessage: async (message) => {
     set({ loading: true });
-    const { data, error } = await supabase
-      .from('messages')
-      .insert([
-        {
-          role: message.role,
-          content: message.content,
-          user_id: (await supabase.auth.getUser()).data.user?.id,
-        },
-      ])
-      .select();
+    try {
+      // Add user message
+      const { data: userData, error: userError } = await supabase
+        .from('messages')
+        .insert([
+          {
+            role: message.role,
+            content: message.content,
+            user_id: (await supabase.auth.getUser()).data.user?.id,
+          },
+        ])
+        .select();
 
-    if (error) throw error;
-    if (data) {
-      set((state) => ({
-        messages: [...state.messages, data[0] as Message],
-        loading: false,
-      }));
+      if (userError) throw userError;
+
+      if (userData) {
+        set((state) => ({
+          messages: [...state.messages, userData[0] as Message],
+        }));
+
+        // Get AI response
+        const aiResponse = await getChatCompletion(get().messages);
+        
+        // Add AI message to database
+        const { data: aiData, error: aiError } = await supabase
+          .from('messages')
+          .insert([
+            {
+              role: 'assistant',
+              content: aiResponse,
+              user_id: (await supabase.auth.getUser()).data.user?.id,
+            },
+          ])
+          .select();
+
+        if (aiError) throw aiError;
+
+        if (aiData) {
+          set((state) => ({
+            messages: [...state.messages, aiData[0] as Message],
+            loading: false,
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Error in addMessage:', error);
+      set({ loading: false });
+      throw error;
     }
   },
   fetchMessages: async () => {
