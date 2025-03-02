@@ -1,16 +1,18 @@
 import React from 'react';
 import { useAuthStore } from '../store/useAuthStore';
-import { Moon, Sun, LogOut, Brain } from 'lucide-react';
+import { Moon, Sun, LogOut, Brain, MessageSquare, History as HistoryIcon } from 'lucide-react';
 import { Button } from './ui/Button';
 import { motion, AnimatePresence } from 'framer-motion';
 import Profile from './Profile';
+import { Link, useLocation } from 'react-router-dom';
 
 interface LayoutProps {
   children: React.ReactNode;
 }
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
-  const { signOut,user } = useAuthStore();
+  const { signOut, user } = useAuthStore();
+  const location = useLocation();
   const [darkMode, setDarkMode] = React.useState(
     window.matchMedia('(prefers-color-scheme: dark)').matches
   );
@@ -86,6 +88,30 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               </motion.div>
               <Profile user={user}/>
             </div>
+          </div>
+          
+          {/* Navigation Tabs */}
+          <div className="flex space-x-1 pb-2">
+            <Link to="/chat">
+              <Button 
+                variant={location.pathname === '/chat' ? 'default' : 'ghost'}
+                size="sm"
+                className="flex items-center gap-2"
+              >
+                <MessageSquare className="h-4 w-4" />
+                <span>Chat</span>
+              </Button>
+            </Link>
+            <Link to="/history">
+              <Button 
+                variant={location.pathname === '/history' ? 'default' : 'ghost'}
+                size="sm"
+                className="flex items-center gap-2"
+              >
+                <HistoryIcon className="h-4 w-4" />
+                <span>History</span>
+              </Button>
+            </Link>
           </div>
         </div>
       </motion.header>
