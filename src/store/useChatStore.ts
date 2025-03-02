@@ -60,20 +60,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
     
     try {
-      // Ensure we have a conversation ID
-      let conversationId = get().currentConversationId;
-      const userId = (await supabase.auth.getUser()).data.user?.id;
+      // Get user ID first
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      
+      if (userError) throw userError;
+      
+      const userId = userData.user?.id;
       
       if (!userId) {
         throw new Error('User is not authenticated');
       }
       
-      if (!conversationId) {
-        conversationId = uuidv4();
-        set({ currentConversationId: conversationId });
+      // Ensure we have a conversation ID and it exists in the database
+      let conversationId = get().currentConversationId;
+      let conversationExists = false;
+      
+      if (conversationId) {
+        // Check if this conversation exists
+        const { data: convData, error: convCheckError } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('id', conversationId)
+          .single();
+          
+        if (convCheckError && convCheckError.code !== 'PGRST116') { // PGRST116 is "not found" which is expected if it doesn't exist
+          throw convCheckError;
+        }
+        
+        conversationExists = !!convData;
+      }
+      
+      // If conversation doesn't exist, create one
+      if (!conversationId || !conversationExists) {
+        conversationId = conversationId || uuidv4();
         
         // Create a new conversation entry
-        const { error: convError } = await supabase
+        const { data: newConvData, error: convError } = await supabase
           .from('conversations')
           .insert([
             {
@@ -82,9 +104,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
               title: message.content.substring(0, 50) + (message.content.length > 50 ? '...' : ''),
               updated_at: new Date().toISOString()
             },
-          ]);
+          ])
+          .select();
           
         if (convError) throw convError;
+        
+        // Verify the conversation was created
+        if (!newConvData || newConvData.length === 0) {
+          throw new Error('Failed to create conversation');
+        }
+        
+        // Update state with the new conversation ID
+        set({ currentConversationId: conversationId });
       } else {
         // Update conversation's updated_at time
         const { error: updateError } = await supabase
@@ -95,8 +126,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (updateError) throw updateError;
       }
 
-      // Replace optimistic message with real message from database
-      const { data: userData, error: userError } = await supabase
+      // Insert user message into the database
+      const { data: messageData, error: messageError } = await supabase
         .from('messages')
         .insert([
           {
@@ -108,59 +139,63 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ])
         .select();
 
-      if (userError) throw userError;
+      if (messageError) throw messageError;
 
-      if (userData) {
-        // Replace the optimistic message with the real one
-        set((state) => ({
-          messages: state.messages.map(msg => 
-            msg.id === tempId ? userData[0] as Message : msg
-          ),
-        }));
+      if (!messageData || messageData.length === 0) {
+        throw new Error('Failed to save message');
+      }
 
-        try {
-          // Get AI response
-          const aiResponse = await getChatCompletion([
-            ...get().messages.filter(m => m.id !== tempId),
-            userData[0] as Message
-          ]);
-          
-          // Add AI message to database
-          const { data: aiData, error: aiError } = await supabase
-            .from('messages')
-            .insert([
-              {
-                role: 'assistant',
-                content: aiResponse,
-                user_id: userId,
-                conversation_id: conversationId
-              },
-            ])
-            .select();
+      // Replace the optimistic message with the real one
+      set((state) => ({
+        messages: state.messages.map(msg => 
+          msg.id === tempId ? messageData[0] as Message : msg
+        ),
+      }));
 
-          if (aiError) throw aiError;
+      try {
+        // Get AI response
+        const aiResponse = await getChatCompletion([
+          ...get().messages.filter(m => m.id !== tempId),
+          messageData[0] as Message
+        ]);
+        
+        // Add AI message to database
+        const { data: aiData, error: aiError } = await supabase
+          .from('messages')
+          .insert([
+            {
+              role: 'assistant',
+              content: aiResponse,
+              user_id: userId,
+              conversation_id: conversationId
+            },
+          ])
+          .select();
 
-          if (aiData) {
-            set((state) => ({
-              messages: [...state.messages, aiData[0] as Message],
-              loading: false,
-            }));
-            
-            // Update conversation title if it's the first message
-            const messagesCount = get().messages.length;
-            if (messagesCount <= 2) {
-              const title = message.content.substring(0, 50) + (message.content.length > 50 ? '...' : '');
-              await get().updateConversationTitle(conversationId, title);
-            }
-          }
-        } catch (aiError) {
-          console.error('Error getting AI response:', aiError);
+        if (aiError) throw aiError;
+
+        if (aiData && aiData.length > 0) {
           set((state) => ({
-            messages: state.messages,
+            messages: [...state.messages, aiData[0] as Message],
             loading: false,
-            error: 'Failed to get AI response. Please try again.'
           }));
+          
+          // Update conversation title if it's the first message
+          const messagesCount = get().messages.length;
+          if (messagesCount <= 2) {
+            const title = message.content.substring(0, 50) + (message.content.length > 50 ? '...' : '');
+            await get().updateConversationTitle(conversationId, title);
+          }
+        } else {
+          throw new Error('Failed to get AI response');
         }
+      } catch (aiError: any) {
+        console.error('Error getting AI response:', aiError);
+        set((state) => ({
+          messages: state.messages,
+          loading: false,
+          error: aiError.message || 'Failed to get AI response. Please try again.'
+        }));
       }
     } catch (error: any) {
       console.error('Error in addMessage:', error);
