@@ -2,9 +2,30 @@ import React, { useEffect } from 'react';
 import { AuthForm } from './components/AuthForm';
 import { Chat } from './pages/Chat';
 import { History } from './pages/History';
+import { HomePage } from './pages/HomePage';
+import { About } from './pages/About';
+import { Resources } from './pages/Resources';
 import { useAuthStore } from './store/useAuthStore';
+import { useChatStore } from './store/useChatStore';
 import { supabase } from './lib/supabase';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { ThemeProvider } from './components/ThemeProvider';
+import { Toaster } from './components/ui/Toaster';
+
+// Route observer component to handle navigation events
+const RouteObserver = () => {
+  const location = useLocation();
+  const { fetchConversations } = useChatStore();
+  
+  useEffect(() => {
+    // Refresh conversations data when navigating to chat or history pages
+    if (location.pathname === '/chat' || location.pathname === '/history') {
+      fetchConversations();
+    }
+  }, [location.pathname, fetchConversations]);
+  
+  return null;
+};
 
 function App() {
   const { user, setUser } = useAuthStore();
@@ -23,20 +44,34 @@ function App() {
     return () => subscription.unsubscribe();
   }, [setUser]);
 
-  if (!user) {
-    return <AuthForm />;
-  }
-
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <ThemeProvider defaultTheme="dark" storageKey="app-theme">
       <BrowserRouter>
-        <Routes>
-          <Route path="/chat" element={<Chat />} />
-          <Route path="/history" element={<History />} />
-          <Route path="*" element={<Navigate to="/chat" replace />} />
-        </Routes>
+        {!user ? (
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/about" element={<About />} />
+            <Route path="/resources" element={<Resources />} />
+            <Route path="/login" element={<AuthForm />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        ) : (
+          <>
+            <RouteObserver />
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/about" element={<About />} />
+              <Route path="/resources" element={<Resources />} />
+              <Route path="/chat" element={<Chat />} />
+              <Route path="/history" element={<History />} />
+              <Route path="/login" element={<Navigate to="/" replace />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </>
+        )}
+        <Toaster />
       </BrowserRouter>
-    </div>
+    </ThemeProvider>
   );
 }
 

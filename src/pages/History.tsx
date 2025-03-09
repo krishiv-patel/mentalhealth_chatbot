@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Layout } from '../components/Layout';
 import { useChatStore } from '../store/useChatStore';
 import { format } from 'date-fns';
@@ -16,20 +16,45 @@ export const History: React.FC = () => {
     updateConversationTitle
   } = useChatStore();
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchConversations();
+    const loadConversations = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        await fetchConversations();
+      } catch (err) {
+        console.error('Error loading conversations:', err);
+        setError('Failed to load conversations. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadConversations();
   }, [fetchConversations]);
 
   const handleOpenConversation = async (conversationId: string) => {
-    await setCurrentConversation(conversationId);
-    navigate('/chat');
+    try {
+      await setCurrentConversation(conversationId);
+      navigate('/chat');
+    } catch (err) {
+      console.error('Error opening conversation:', err);
+      setError('Failed to open conversation. Please try again.');
+    }
   };
 
   const handleEditTitle = async (conversationId: string, currentTitle: string) => {
     const newTitle = prompt('Edit conversation title:', currentTitle);
     if (newTitle && newTitle !== currentTitle) {
-      await updateConversationTitle(conversationId, newTitle);
+      try {
+        await updateConversationTitle(conversationId, newTitle);
+      } catch (err) {
+        console.error('Error updating conversation title:', err);
+        setError('Failed to update conversation title. Please try again.');
+      }
     }
   };
 
@@ -38,11 +63,31 @@ export const History: React.FC = () => {
       <div className="max-w-4xl mx-auto">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-3xl font-semibold text-foreground/80">Conversation History</h2>
+          {loading && (
+            <div className="flex items-center text-muted">
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Loading...
+            </div>
+          )}
         </div>
+
+        {error && (
+          <div className="bg-destructive/10 text-destructive p-4 rounded-lg mb-4">
+            <p>{error}</p>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => fetchConversations()}
+              className="mt-2"
+            >
+              Try Again
+            </Button>
+          </div>
+        )}
 
         <div className="bg-card/50 backdrop-blur-lg rounded-2xl shadow-xl overflow-hidden ring-1 ring-border">
           <div className="h-[600px] overflow-y-auto p-4 scroll-smooth space-y-4">
-            {conversations.length === 0 ? (
+            {!loading && conversations.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center p-6">
                 <MessageSquare className="h-16 w-16 text-muted mb-4" />
                 <h3 className="text-xl font-medium mb-2">No conversations yet</h3>

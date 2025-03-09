@@ -60,7 +60,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
           .from('attachments')
           .upload(filePath, file);
 
-        if (uploadError) throw uploadError;
+        if (uploadError) {
+          console.error('File upload error:', uploadError);
+          throw uploadError;
+        }
 
         const { data: urlData } = await supabase.storage
           .from('attachments')
@@ -74,7 +77,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         };
       } catch (error: any) {
         console.error('Error uploading file:', error);
-        set({ error: 'Failed to upload file. Please try again.' });
+        set({ error: `Failed to upload file: ${error.message}. Please try again.` });
         return;
       }
     }
@@ -87,7 +90,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     
     try {
       const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError) throw userError;
+      if (userError) {
+        console.error('Auth error:', userError);
+        throw userError;
+      }
       
       const userId = userData.user?.id;
       if (!userId) {
@@ -97,145 +103,206 @@ export const useChatStore = create<ChatState>((set, get) => ({
       let conversationId = get().currentConversationId;
       let conversationExists = false;
       
+      // Check if the conversation exists
       if (conversationId) {
-        const { data: convData, error: convCheckError } = await supabase
-          .from('conversations')
-          .select('id')
-          .eq('id', conversationId)
-          .single();
-          
-        if (convCheckError && convCheckError.code !== 'PGRST116') {
-          throw convCheckError;
+        try {
+          const { data: convData, error: convCheckError } = await supabase
+            .from('conversations')
+            .select('id')
+            .eq('id', conversationId)
+            .single();
+            
+          if (convCheckError) {
+            if (convCheckError.code !== 'PGRST116') {
+              console.error('Conversation check error:', convCheckError);
+            }
+            // If the conversation doesn't exist, we'll create a new one below
+            conversationExists = false;
+          } else {
+            conversationExists = !!convData;
+          }
+        } catch (error: any) {
+          console.error('Error checking conversation:', error);
+          // Continue with creating a new conversation
+          conversationExists = false;
         }
-        
-        conversationExists = !!convData;
       }
       
       if (!conversationId || !conversationExists) {
         conversationId = conversationId || uuidv4();
         
-        const { data: newConvData, error: convError } = await supabase
-          .from('conversations')
-          .insert([
-            {
-              id: conversationId,
-              user_id: userId,
-              title: message.content.substring(0, 50) + (message.content.length > 50 ? '...' : ''),
-              updated_at: new Date().toISOString()
-            },
-          ])
-          .select();
+        try {
+          const { data: newConvData, error: convError } = await supabase
+            .from('conversations')
+            .insert([
+              {
+                id: conversationId,
+                user_id: userId,
+                title: message.content.substring(0, 50) + (message.content.length > 50 ? '...' : '')
+              }
+            ])
+            .select();
+  
+          if (convError) {
+            console.error('Error creating conversation:', convError);
+            throw convError;
+          }
           
-        if (convError) throw convError;
-        
-        if (!newConvData || newConvData.length === 0) {
-          throw new Error('Failed to create conversation');
+          set({ currentConversationId: conversationId });
+          
+          // Update conversations list with the new conversation
+          const { data: createdConv } = await supabase
+            .from('conversations')
+            .select('id, title, updated_at')
+            .eq('id', conversationId)
+            .single();
+            
+          if (createdConv) {
+            set(state => ({
+              conversations: [
+                {
+                  id: createdConv.id,
+                  title: createdConv.title,
+                  updatedAt: createdConv.updated_at
+                },
+                ...state.conversations
+              ]
+            }));
+          }
+        } catch (error: any) {
+          console.error('Error in conversation creation:', error);
+          // Continue with message insertion anyway
         }
-        
-        set({ currentConversationId: conversationId });
-      } else {
-        const { error: updateError } = await supabase
-          .from('conversations')
-          .update({ updated_at: new Date().toISOString() })
-          .eq('id', conversationId);
-          
-        if (updateError) throw updateError;
       }
-
-      const { data: messageData, error: messageError } = await supabase
-        .from('messages')
-        .insert([
-          {
-            role: message.role,
-            content: message.content,
-            user_id: userId,
-            conversation_id: conversationId,
-            attachment: tempMessage.attachment
-          },
-        ])
-        .select();
-
-      if (messageError) throw messageError;
-
-      if (!messageData || messageData.length === 0) {
-        throw new Error('Failed to save message');
-      }
-
-      set((state) => ({
-        messages: state.messages.map(msg => 
-          msg.id === tempId ? messageData[0] as Message : msg
-        ),
-      }));
-
+      
+      // Insert the user message
       try {
-        // Create a temporary assistant message that we'll update with the stream
-        const tempAssistantId = 'temp-' + uuidv4();
-        const tempAssistantMessage: Message = {
-          id: tempAssistantId,
-          role: 'assistant',
-          content: '',
-          timestamp: new Date().toISOString(),
-          conversation_id: conversationId
-        };
-
-        set((state) => ({
-          messages: [...state.messages, tempAssistantMessage],
-        }));
-
-        let fullResponse = '';
-        const stream = getChatCompletionStream([
-          ...get().messages.filter(m => m.id !== tempId && m.id !== tempAssistantId),
-          messageData[0] as Message
-        ], file);
-
-        for await (const chunk of stream) {
-          fullResponse += chunk;
-          set((state) => ({
-            messages: state.messages.map(msg =>
-              msg.id === tempAssistantId
-                ? { ...msg, content: fullResponse }
-                : msg
-            ),
-          }));
-        }
-        
-        // Save the complete response to the database
-        const { data: aiData, error: aiError } = await supabase
+        const { data: messageData, error: messageError } = await supabase
           .from('messages')
           .insert([
             {
-              role: 'assistant',
-              content: fullResponse,
+              role: message.role,
+              content: message.content,
               user_id: userId,
-              conversation_id: conversationId
-            },
+              conversation_id: conversationId,
+              ...(tempMessage.attachment ? { attachment: tempMessage.attachment } : {})
+            }
           ])
           .select();
-
-        if (aiError) throw aiError;
-
-        if (aiData && aiData.length > 0) {
-          set((state) => ({
-            messages: state.messages.map(msg =>
-              msg.id === tempAssistantId ? aiData[0] as Message : msg
-            ),
-            loading: false,
-          }));
           
-          const messagesCount = get().messages.length;
-          if (messagesCount <= 2) {
-            const title = message.content.substring(0, 50) + (message.content.length > 50 ? '...' : '');
-            await get().updateConversationTitle(conversationId, title);
-          }
-        } else {
-          throw new Error('Failed to save AI response');
+        if (messageError) {
+          console.error('Error inserting message:', messageError);
+          throw messageError;
         }
-      } catch (aiError: any) {
-        console.error('Error getting AI response:', aiError);
+
+        if (!messageData || messageData.length === 0) {
+          throw new Error('Failed to save message');
+        }
+
         set((state) => ({
-          messages: state.messages.filter(msg => msg.id !== tempAssistantId),
+          messages: state.messages.map(msg => 
+            msg.id === tempId ? messageData[0] as Message : msg
+          ),
+        }));
+
+        // Declare tempAssistantId outside the try block to make it accessible in the catch block
+        const tempAssistantId = 'temp-' + uuidv4();
+        
+        try {
+          // Create a temporary assistant message that we'll update with the stream
+          const tempAssistantMessage: Message = {
+            id: tempAssistantId,
+            role: 'assistant',
+            content: '',
+            timestamp: new Date().toISOString(),
+            conversation_id: conversationId
+          };
+
+          set((state) => ({
+            messages: [...state.messages, tempAssistantMessage],
+          }));
+
+          let fullResponse = '';
+          const stream = getChatCompletionStream([
+            ...get().messages.filter(m => m.id !== tempId && m.id !== tempAssistantId),
+            messageData[0] as Message
+          ], file);
+
+          for await (const chunk of stream) {
+            fullResponse += chunk;
+            set((state) => ({
+              messages: state.messages.map(msg =>
+                msg.id === tempAssistantId
+                  ? { ...msg, content: fullResponse }
+                  : msg
+              ),
+            }));
+          }
+          
+          // Save the complete response to the database
+          try {
+            const { data: aiData, error: aiError } = await supabase
+              .from('messages')
+              .insert([
+                {
+                  role: 'assistant',
+                  content: fullResponse,
+                  user_id: userId,
+                  conversation_id: conversationId
+                },
+              ])
+              .select();
+
+            if (aiError) {
+              console.error('Error saving AI response:', aiError);
+              throw aiError;
+            }
+
+            if (aiData && aiData.length > 0) {
+              set((state) => ({
+                messages: state.messages.map(msg =>
+                  msg.id === tempAssistantId ? aiData[0] as Message : msg
+                ),
+                loading: false,
+              }));
+              
+              const messagesCount = get().messages.length;
+              if (messagesCount <= 2) {
+                try {
+                  const title = message.content.substring(0, 50) + (message.content.length > 50 ? '...' : '');
+                  await get().updateConversationTitle(conversationId, title);
+                } catch (titleError) {
+                  console.error('Error updating conversation title:', titleError);
+                  // Don't fail the whole operation if title update fails
+                }
+              }
+            } else {
+              console.error('No AI response data returned');
+              throw new Error('Failed to save AI response');
+            }
+          } catch (aiError: any) {
+            console.error('Error getting AI response:', aiError);
+            // Keep the user message but show error for the AI response
+            set((state) => ({
+              messages: state.messages.filter(msg => msg.id !== tempAssistantId),
+              loading: false,
+              error: aiError.message || 'Failed to get AI response. Please try again.'
+            }));
+          }
+        } catch (error: any) {
+          console.error('Error in addMessage:', error);
+          set((state) => ({
+            messages: state.messages.filter(msg => msg.id !== tempId),
+            loading: false,
+            error: error.message || 'Failed to send message. Please try again.'
+          }));
+        }
+      } catch (error: any) {
+        console.error('Error in addMessage:', error);
+        set((state) => ({
+          messages: state.messages.filter(msg => msg.id !== tempId),
           loading: false,
-          error: aiError.message || 'Failed to get AI response. Please try again.'
+          error: error.message || 'Failed to send message. Please try again.'
         }));
       }
     } catch (error: any) {
@@ -282,26 +349,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return;
       }
       
+      // Simplified query to avoid column selection syntax errors
       const { data, error } = await supabase
         .from('conversations')
-        .select('*')
+        .select('id, title, updated_at, user_id')
         .eq('user_id', userId)
         .order('updated_at', { ascending: false });
 
-      if (error) throw error;
-      if (data) {
+      if (error) {
+        console.error('Supabase query error:', error);
+        // Don't throw, just log and handle gracefully
         set({ 
-          conversations: data.map(conv => ({
-            id: conv.id,
-            title: conv.title,
-            updatedAt: conv.updated_at
-          })),
-          error: null
+          error: `Failed to load conversations: ${error.message}`,
+          // Keep existing conversations to prevent UI disruption
         });
+        return;
       }
+      
+      // Fix: Make sure we handle the case when data is null or empty array
+      const conversations = data || [];
+      console.log('Fetched conversations:', conversations); // Debug log
+      
+      set({ 
+        conversations: conversations.map(conv => ({
+          id: conv.id,
+          title: conv.title,
+          updatedAt: conv.updated_at
+        })),
+        error: null
+      });
     } catch (error: any) {
       console.error('Error fetching conversations:', error);
-      set({ error: error.message || 'Failed to load conversations' });
+      set({ 
+        error: error.message || 'Failed to load conversations',
+        // Don't clear conversations on error - keep existing state
+      });
     }
   },
   
