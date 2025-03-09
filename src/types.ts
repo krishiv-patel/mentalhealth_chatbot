@@ -4,7 +4,13 @@ export interface Message {
     content: string;
     timestamp: string;
     conversation_id?: string;
-  }
+    attachment?: {
+      type: 'document';
+      name: string;
+      url: string;
+      size: number;
+    };
+}
 
 export interface Conversation {
   id: string;

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trash2, User, Bot, Info } from 'lucide-react';
+import { Trash2, User, Bot, Info, FileText, Download } from 'lucide-react';
 import { Button } from './ui/Button';
 import { motion } from 'framer-motion';
 import { cn } from '../lib/utils';
@@ -15,6 +15,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   timestamp,
   id,
   onDelete,
+  attachment
 }) => {
   const isUser = role === 'user';
   const isSystem = role === 'system';
@@ -78,71 +79,57 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
       exit="exit"
       whileHover="hover"
       className={cn(
-        'flex mb-4',
-        isUser ? 'justify-end' : 'justify-start'
+        'flex gap-3 p-4 rounded-lg',
+        isUser ? 'bg-primary/10' : 'bg-muted/50',
+        isTemporary && 'opacity-50'
       )}
     >
-      <div
-        className={cn(
-          'max-w-[80%] rounded-2xl p-4 message-transition',
-          isUser
-            ? 'bg-gradient-to-br from-primary to-blue-600 text-white ml-auto shadow-lg hover:shadow-xl'
-            : isSystem
-            ? 'bg-gradient-to-br from-amber-500 to-amber-600 text-white'
-            : 'bg-secondary/80 dark:bg-secondary/50 dark:text-white backdrop-blur-sm',
-          isTemporary && 'opacity-70'
+      <div className="flex-shrink-0">
+        {isUser ? (
+          <User className="h-6 w-6" />
+        ) : isSystem ? (
+          <Info className="h-6 w-6" />
+        ) : (
+          <Bot className="h-6 w-6" />
         )}
-      >
-        <div className="flex items-start gap-3">
-          <motion.div 
-            variants={iconVariants}
-            className={`flex-shrink-0 ${isUser ? 'order-last' : 'order-first'}`}
-          >
-            {isUser ? (
-              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center animate-pulse">
-                <User className="h-5 w-5 text-white" />
-              </div>
-            ) : isSystem ? (
-              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
-                <Info className="h-5 w-5 text-white" />
-              </div>
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center animate-float">
-                <Bot className="h-5 w-5 text-primary" />
-              </div>
+      </div>
+      <div className="flex-1 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium">
+            {isUser ? 'You' : isSystem ? 'System' : 'Assistant'}
+          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">{timestamp}</span>
+            {onDelete && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onDelete}
+                className="opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
             )}
-          </motion.div>
-          <div className="flex-1">
-            <div className="flex justify-between items-start gap-4">
-              <div className="whitespace-pre-wrap break-words">
-                {content}
-                {isTemporary && (
-                  <span className="ml-2 text-xs italic opacity-80">
-                    Sending...
-                  </span>
-                )}
-              </div>
-              {onDelete && !isTemporary && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.2 }}
-                >
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={onDelete}
-                    className="text-white/80 hover:text-white hover:bg-white/20 transition-colors"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </motion.div>
-              )}
-            </div>
-            <div className="text-xs opacity-70 text-right">
-              {formattedTime}
-            </div>
           </div>
+        </div>
+        <div className="space-y-2">
+          <p className="text-sm leading-relaxed">{content}</p>
+          {attachment && (
+            <div className="flex items-center gap-2 p-2 bg-background/50 rounded-lg">
+              <FileText className="h-5 w-5 text-muted-foreground" />
+              <span className="text-sm truncate flex-1">
+                {attachment.name} ({Math.round(attachment.size / 1024)}KB)
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => window.open(attachment.url, '_blank')}
+                className="ml-2"
+              >
+                <Download className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </motion.div>

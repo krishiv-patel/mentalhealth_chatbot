@@ -41,9 +41,9 @@ export const Chat: React.FC = () => {
     fetchProfile();
   }, [fetchMessages, fetchProfile]);
 
-  const handleSend = async (content: string) => {
+  const handleSend = async (content: string, file?: File) => {
     try {
-      await addMessage({ role: 'user', content });
+      await addMessage({ role: 'user', content }, file);
     } catch (error) {
       console.error('Error sending message:', error);
     }
@@ -124,7 +124,7 @@ export const Chat: React.FC = () => {
               {messages.length === 0 && !currentConversationId ? (
                 <div className="flex flex-col items-center justify-center h-96 text-center p-6">
                   <h3 className="text-xl font-medium mb-2">Start a new conversation</h3>
-                  <p className="text-muted mb-4">Type a message below to begin chatting.</p>
+                  <p className="text-muted mb-4">Type a message or upload a document to begin chatting.</p>
                 </div>
               ) : (
                 messages.map((message) => (

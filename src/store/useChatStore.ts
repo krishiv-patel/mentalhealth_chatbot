@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
-import { getChatCompletion } from '../lib/lmstudio';
+import { getChatCompletionStream } from '../lib/lmstudio';
 import type { Message } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -10,7 +10,7 @@ interface ChatState {
   currentConversationId: string | null;
   conversations: { id: string; title: string; updatedAt: string }[];
   error: string | null;
-  addMessage: (message: Omit<Message, 'id' | 'timestamp' | 'conversation_id'>) => Promise<void>;
+  addMessage: (message: Omit<Message, 'id' | 'timestamp' | 'conversation_id'>, file?: File) => Promise<void>;
   fetchMessages: () => Promise<void>;
   deleteMessage: (id: string) => Promise<void>;
   clearHistory: () => Promise<void>;
@@ -41,8 +41,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     return newConversationId;
   },
   
-  addMessage: async (message) => {
-    // Add optimistic update for better UI responsiveness
+  addMessage: async (message, file) => {
     const tempId = 'temp-' + uuidv4();
     const tempMessage = {
       id: tempId,
@@ -51,8 +50,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
       timestamp: new Date().toISOString(),
       conversation_id: get().currentConversationId || 'new',
     } as Message;
+
+    if (file) {
+      const fileName = file.name;
+      const filePath = `${get().currentConversationId || 'new'}/${uuidv4()}-${fileName}`;
+      
+      try {
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('attachments')
+          .upload(filePath, file);
+
+        if (uploadError) throw uploadError;
+
+        const { data: urlData } = await supabase.storage
+          .from('attachments')
+          .getPublicUrl(filePath);
+
+        tempMessage.attachment = {
+          type: 'document',
+          name: fileName,
+          url: urlData.publicUrl,
+          size: file.size
+        };
+      } catch (error: any) {
+        console.error('Error uploading file:', error);
+        set({ error: 'Failed to upload file. Please try again.' });
+        return;
+      }
+    }
     
-    // Add message to UI immediately
     set(state => ({ 
       messages: [...state.messages, tempMessage],
       loading: true,
@@ -60,41 +86,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
     
     try {
-      // Get user ID first
       const { data: userData, error: userError } = await supabase.auth.getUser();
-      
       if (userError) throw userError;
       
       const userId = userData.user?.id;
-      
       if (!userId) {
         throw new Error('User is not authenticated');
       }
       
-      // Ensure we have a conversation ID and it exists in the database
       let conversationId = get().currentConversationId;
       let conversationExists = false;
       
       if (conversationId) {
-        // Check if this conversation exists
         const { data: convData, error: convCheckError } = await supabase
           .from('conversations')
           .select('id')
           .eq('id', conversationId)
           .single();
           
-        if (convCheckError && convCheckError.code !== 'PGRST116') { // PGRST116 is "not found" which is expected if it doesn't exist
+        if (convCheckError && convCheckError.code !== 'PGRST116') {
           throw convCheckError;
         }
         
         conversationExists = !!convData;
       }
       
-      // If conversation doesn't exist, create one
       if (!conversationId || !conversationExists) {
         conversationId = conversationId || uuidv4();
         
-        // Create a new conversation entry
         const { data: newConvData, error: convError } = await supabase
           .from('conversations')
           .insert([
@@ -109,15 +128,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           
         if (convError) throw convError;
         
-        // Verify the conversation was created
         if (!newConvData || newConvData.length === 0) {
           throw new Error('Failed to create conversation');
         }
         
-        // Update state with the new conversation ID
         set({ currentConversationId: conversationId });
       } else {
-        // Update conversation's updated_at time
         const { error: updateError } = await supabase
           .from('conversations')
           .update({ updated_at: new Date().toISOString() })
@@ -126,7 +142,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (updateError) throw updateError;
       }
 
-      // Insert user message into the database
       const { data: messageData, error: messageError } = await supabase
         .from('messages')
         .insert([
@@ -134,7 +149,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             role: message.role,
             content: message.content,
             user_id: userId,
-            conversation_id: conversationId
+            conversation_id: conversationId,
+            attachment: tempMessage.attachment
           },
         ])
         .select();
@@ -145,7 +161,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         throw new Error('Failed to save message');
       }
 
-      // Replace the optimistic message with the real one
       set((state) => ({
         messages: state.messages.map(msg => 
           msg.id === tempId ? messageData[0] as Message : msg
@@ -153,19 +168,44 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }));
 
       try {
-        // Get AI response
-        const aiResponse = await getChatCompletion([
-          ...get().messages.filter(m => m.id !== tempId),
+        // Create a temporary assistant message that we'll update with the stream
+        const tempAssistantId = 'temp-' + uuidv4();
+        const tempAssistantMessage: Message = {
+          id: tempAssistantId,
+          role: 'assistant',
+          content: '',
+          timestamp: new Date().toISOString(),
+          conversation_id: conversationId
+        };
+
+        set((state) => ({
+          messages: [...state.messages, tempAssistantMessage],
+        }));
+
+        let fullResponse = '';
+        const stream = getChatCompletionStream([
+          ...get().messages.filter(m => m.id !== tempId && m.id !== tempAssistantId),
           messageData[0] as Message
-        ]);
+        ], file);
+
+        for await (const chunk of stream) {
+          fullResponse += chunk;
+          set((state) => ({
+            messages: state.messages.map(msg =>
+              msg.id === tempAssistantId
+                ? { ...msg, content: fullResponse }
+                : msg
+            ),
+          }));
+        }
         
-        // Add AI message to database
+        // Save the complete response to the database
         const { data: aiData, error: aiError } = await supabase
           .from('messages')
           .insert([
             {
               role: 'assistant',
-              content: aiResponse,
+              content: fullResponse,
               user_id: userId,
               conversation_id: conversationId
             },
@@ -176,30 +216,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         if (aiData && aiData.length > 0) {
           set((state) => ({
-            messages: [...state.messages, aiData[0] as Message],
+            messages: state.messages.map(msg =>
+              msg.id === tempAssistantId ? aiData[0] as Message : msg
+            ),
             loading: false,
           }));
           
-          // Update conversation title if it's the first message
           const messagesCount = get().messages.length;
           if (messagesCount <= 2) {
             const title = message.content.substring(0, 50) + (message.content.length > 50 ? '...' : '');
             await get().updateConversationTitle(conversationId, title);
           }
         } else {
-          throw new Error('Failed to get AI response');
+          throw new Error('Failed to save AI response');
         }
       } catch (aiError: any) {
         console.error('Error getting AI response:', aiError);
         set((state) => ({
-          messages: state.messages,
+          messages: state.messages.filter(msg => msg.id !== tempAssistantId),
           loading: false,
           error: aiError.message || 'Failed to get AI response. Please try again.'
         }));
       }
     } catch (error: any) {
       console.error('Error in addMessage:', error);
-      // Remove the optimistic message on error
       set((state) => ({
         messages: state.messages.filter(msg => msg.id !== tempId),
         loading: false,
