@@ -15,7 +15,7 @@ export const About: React.FC = () => {
           </Button>
         </Link>
 
-        <h1 className="text-4xl font-bold mb-8 gradient-text">About MindfulAI Therapy</h1>
+        <h1 className="text-4xl font-bold mb-8 gradient-text">About MindfulAI</h1>
         
         <div className="space-y-8">
           <section className="bg-card rounded-xl p-6 border">
@@ -24,7 +24,7 @@ export const About: React.FC = () => {
               <span>Our Mission</span>
             </h2>
             <p className="text-muted-foreground mb-4">
-              MindfulAI Therapy is dedicated to making mental health support accessible to everyone. 
+              MindfulAI is dedicated to making mental health support accessible to everyone. 
               We've created an AI companion that offers emotional support, evidence-based techniques, 
               and a safe space to explore your thoughts and feelings.
             </p>
