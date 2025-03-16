@@ -10,9 +10,10 @@ interface ChatState {
   currentConversationId: string | null;
   conversations: { id: string; title: string; updatedAt: string }[];
   error: string | null;
-  addMessage: (message: Omit<Message, 'id' | 'timestamp' | 'conversation_id'>, file?: File) => Promise<void>;
+  addMessage: (message: Omit<Message, 'id' | 'timestamp' | 'conversation_id'>, files?: File | File[]) => Promise<void>;
   fetchMessages: () => Promise<void>;
   deleteMessage: (id: string) => Promise<void>;
+  editMessage: (id: string, newContent: string) => Promise<void>;
   clearHistory: () => Promise<void>;
   startNewConversation: () => void;
   fetchConversations: () => Promise<void>;
@@ -20,6 +21,8 @@ interface ChatState {
   deleteConversation: (conversationId: string) => Promise<void>;
   updateConversationTitle: (conversationId: string, title: string) => Promise<void>;
   clearError: () => void;
+  stopGeneration: () => void;
+  isGenerating: boolean;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -28,8 +31,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentConversationId: null,
   conversations: [],
   error: null,
+  isGenerating: false,
   
   clearError: () => set({ error: null }),
+  
+  stopGeneration: () => {
+    // Implement stop signal for streaming
+    window.stopGenerationSignal = true;
+    set({ isGenerating: false });
+  },
   
   startNewConversation: () => {
     const newConversationId = uuidv4();
@@ -41,7 +51,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     return newConversationId;
   },
   
-  addMessage: async (message, file) => {
+  addMessage: async (message, files) => {
     const tempId = 'temp-' + uuidv4();
     const tempMessage = {
       id: tempId,
@@ -51,11 +61,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
       conversation_id: get().currentConversationId || 'new',
     } as Message;
 
-    if (file) {
+    // Normalize files to array
+    const filesArray = files ? (Array.isArray(files) ? files : [files]) : [];
+
+    // Handle the first file for compatibility with existing code
+    const file = filesArray.length > 0 ? filesArray[0] : undefined;
+
+    // Validate file before processing
+    if (file && file instanceof Blob) {
       const fileName = file.name;
       const filePath = `${get().currentConversationId || 'new'}/${uuidv4()}-${fileName}`;
       
       try {
+        // Ensure the file type is supported before uploading
+        const isImage = file.type.startsWith('image/');
+        const isDocument = file.type === 'application/pdf' || 
+                           file.type === 'text/plain' ||
+                           file.type === 'text/csv' ||
+                           file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+                           file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        
+        // If file has no type, try to infer from extension
+        const extension = fileName.split('.').pop()?.toLowerCase();
+        const hasValidExtension = extension && ['txt', 'pdf', 'doc', 'docx', 'csv', 'jpg', 'jpeg', 'png', 'gif'].includes(extension);
+        
+        if (!isImage && !isDocument && !hasValidExtension) {
+          set({ error: 'Unsupported file type. Please upload text documents, PDFs, or images.' });
+          return;
+        }
+        
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from('attachments')
           .upload(filePath, file);
@@ -70,7 +104,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           .getPublicUrl(filePath);
 
         tempMessage.attachment = {
-          type: 'document',
+          type: file.type.startsWith('image/') ? 'image' : 'document',
           name: fileName,
           url: urlData.publicUrl,
           size: file.size
@@ -80,6 +114,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set({ error: `Failed to upload file: ${error.message}. Please try again.` });
         return;
       }
+    } else if (file) {
+      console.error('Invalid file object:', file);
+      set({ error: 'Invalid file format. Please try again with a different file.' });
+      return;
     }
     
     set(state => ({ 
@@ -220,15 +258,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           set((state) => ({
             messages: [...state.messages, tempAssistantMessage],
+            isGenerating: true,
           }));
 
           let fullResponse = '';
+          
+          // Make sure files are valid Blobs before passing them
+          const validFiles = filesArray.filter(file => file instanceof Blob);
+          
           const stream = getChatCompletionStream([
             ...get().messages.filter(m => m.id !== tempId && m.id !== tempAssistantId),
             messageData[0] as Message
-          ], file);
+          ], validFiles.length > 0 ? validFiles : undefined);
 
           for await (const chunk of stream) {
+            // Check if generation should be stopped
+            if (window.stopGenerationSignal) {
+              break;
+            }
+            
             fullResponse += chunk;
             set((state) => ({
               messages: state.messages.map(msg =>
@@ -264,6 +312,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   msg.id === tempAssistantId ? aiData[0] as Message : msg
                 ),
                 loading: false,
+                isGenerating: false,
               }));
               
               const messagesCount = get().messages.length;
@@ -286,6 +335,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             set((state) => ({
               messages: state.messages.filter(msg => msg.id !== tempAssistantId),
               loading: false,
+              isGenerating: false,
               error: aiError.message || 'Failed to get AI response. Please try again.'
             }));
           }
@@ -294,6 +344,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           set((state) => ({
             messages: state.messages.filter(msg => msg.id !== tempId),
             loading: false,
+            isGenerating: false,
             error: error.message || 'Failed to send message. Please try again.'
           }));
         }
@@ -302,6 +353,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         set((state) => ({
           messages: state.messages.filter(msg => msg.id !== tempId),
           loading: false,
+          isGenerating: false,
           error: error.message || 'Failed to send message. Please try again.'
         }));
       }
@@ -310,6 +362,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((state) => ({
         messages: state.messages.filter(msg => msg.id !== tempId),
         loading: false,
+        isGenerating: false,
         error: error.message || 'Failed to send message. Please try again.'
       }));
     }
@@ -407,6 +460,154 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (error: any) {
       console.error('Error deleting message:', error);
       set({ error: error.message || 'Failed to delete message' });
+    }
+  },
+  
+  editMessage: async (id, newContent) => {
+    try {
+      // First update UI optimistically
+      const messageToEdit = get().messages.find(m => m.id === id);
+      if (!messageToEdit) {
+        throw new Error('Message not found');
+      }
+      
+      // Save old message content for rollback if needed
+      const oldContent = messageToEdit.content;
+      
+      // Skip if content is the same
+      if (oldContent === newContent) {
+        return;
+      }
+      
+      // Update the UI immediately
+      set(state => ({
+        messages: state.messages.map(msg => 
+          msg.id === id ? { ...msg, content: newContent } : msg
+        ),
+        loading: true
+      }));
+      
+      // Update the message in the database
+      const { error: updateError } = await supabase
+        .from('messages')
+        .update({ content: newContent })
+        .eq('id', id);
+      
+      if (updateError) {
+        // Rollback the UI change if there's an error
+        set(state => ({
+          messages: state.messages.map(msg => 
+            msg.id === id ? { ...msg, content: oldContent } : msg
+          ),
+          loading: false,
+          error: `Failed to update message: ${updateError.message}`
+        }));
+        throw updateError;
+      }
+      
+      // Get all messages after the edited message to remove them
+      const messageIndex = get().messages.findIndex(m => m.id === id);
+      if (messageIndex === -1) return;
+      
+      // Remove all assistant messages that come after this edited message
+      const messagesToDelete = get().messages.slice(messageIndex + 1);
+      const assistantMessagesToDelete = messagesToDelete.filter(m => m.role === 'assistant');
+      
+      // Delete these messages from the database
+      for (const msg of assistantMessagesToDelete) {
+        if (!msg.id.startsWith('temp-')) {
+          await supabase
+            .from('messages')
+            .delete()
+            .eq('id', msg.id);
+        }
+      }
+      
+      // Remove the messages from the UI
+      set(state => ({
+        messages: state.messages.filter((_, index) => index <= messageIndex)
+      }));
+      
+      // Now get an updated response for the edited message
+      const userId = (await supabase.auth.getUser()).data.user?.id;
+      if (!userId) {
+        throw new Error('User is not authenticated');
+      }
+      
+      // Add a temporary message for the stream
+      const tempAssistantId = 'temp-' + uuidv4();
+      const tempAssistantMessage: Message = {
+        id: tempAssistantId,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date().toISOString(),
+        conversation_id: get().currentConversationId as string
+      };
+      
+      set(state => ({
+        messages: [...state.messages, tempAssistantMessage]
+      }));
+      
+      // Reset stop signal before starting generation
+      window.stopGenerationSignal = false;
+      
+      // Stream the new response
+      let fullResponse = '';
+      const stream = getChatCompletionStream(
+        get().messages.filter(m => m.id !== tempAssistantId)
+      );
+      
+      for await (const chunk of stream) {
+        // Check if generation should be stopped
+        if (window.stopGenerationSignal) {
+          break;
+        }
+        
+        fullResponse += chunk;
+        set(state => ({
+          messages: state.messages.map(msg =>
+            msg.id === tempAssistantId
+              ? { ...msg, content: fullResponse }
+              : msg
+          )
+        }));
+      }
+      
+      // Save the new response to the database
+      const { data: aiData, error: aiError } = await supabase
+        .from('messages')
+        .insert([
+          {
+            role: 'assistant',
+            content: fullResponse,
+            user_id: userId,
+            conversation_id: get().currentConversationId
+          }
+        ])
+        .select();
+      
+      if (aiError) {
+        throw aiError;
+      }
+      
+      // Update the temporary message with the real one from the database
+      set(state => ({
+        messages: state.messages.map(msg =>
+          msg.id === tempAssistantId
+            ? (aiData[0] as Message)
+            : msg
+        ),
+        loading: false,
+        isGenerating: false
+      }));
+      
+    } catch (error: any) {
+      console.error('Error editing message:', error);
+      set({
+        loading: false,
+        isGenerating: false,
+        error: `Failed to edit message: ${error.message}`
+      });
     }
   },
   

@@ -4,28 +4,69 @@ const LMSTUDIO_URL = 'http://localhost:1234/v1/chat/completions';
 
 async function readFileContent(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
+    // Check if file is valid
+    if (!file || !(file instanceof Blob)) {
+      console.error('Invalid file object:', file);
+      resolve(''); // Return empty string instead of rejecting to prevent app crashes
+      return;
+    }
+
+    // Handle different file types appropriately
     const reader = new FileReader();
     reader.onload = (e) => {
       resolve(e.target?.result as string);
     };
     reader.onerror = (e) => {
+      console.error('FileReader error:', e);
       reject(new Error('Failed to read file'));
     };
+
+    // For image files, we don't try to read text content but add a placeholder
+    if (file.type.startsWith('image/')) {
+      resolve(`[Image: ${file.name} (${Math.round(file.size/1024)} KB)]`);
+      return;
+    }
+    
+    // For binary files like PDFs or non-text documents, we might want a different approach
+    if (file.type === 'application/pdf' || 
+        file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+      resolve(`[Document: ${file.name} (${Math.round(file.size/1024)} KB) - Binary content]`);
+      return;
+    }
+    
+    // For text-based files, proceed with readAsText
     reader.readAsText(file);
   });
 }
 
-export async function* getChatCompletionStream(messages: Message[], file?: File) {
+export async function* getChatCompletionStream(messages: Message[], files?: File | File[]) {
   try {
     let fileContent = '';
-    if (file) {
-      fileContent = await readFileContent(file);
+    
+    // Handle single file or array of files
+    if (files) {
+      try {
+        // Convert to array if it's a single file
+        const filesArray = Array.isArray(files) ? files : [files];
+        
+        // Process each file and combine the content with a separator
+        for (const file of filesArray) {
+          if (file && file instanceof Blob) {
+            const content = await readFileContent(file);
+            fileContent += content + '\n\n';
+          }
+        }
+      } catch (error) {
+        console.error('Error reading files:', error);
+        // Continue with empty file content
+      }
     }
 
     const systemMessage = {
       role: 'system',
       content: `You are a helpful AI assistant that can analyze documents and chat with users. ${
-        file ? 'Please analyze the following document content and provide insights or answer questions about it:\n\n' + fileContent : ''
+        fileContent ? 'Please analyze the following document content and provide insights or answer questions about it:\n\n' + fileContent : ''
       }`
     };
 

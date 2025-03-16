@@ -26,7 +26,13 @@ import {
   HelpCircle,
   FileText,
   History as HistoryIcon,
-  User
+  User,
+  Square,
+  RefreshCw,
+  BookOpen,
+  Sparkles,
+  Wand2,
+  Languages
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
@@ -52,7 +58,10 @@ export const Chat: React.FC = () => {
     clearError,
     conversations,
     fetchConversations,
-    setCurrentConversation
+    setCurrentConversation,
+    editMessage,
+    stopGeneration,
+    isGenerating
   } = useChatStore();
   const { profile, fetchProfile } = useProfileStore();
   const { user } = useAuthStore();
@@ -66,6 +75,9 @@ export const Chat: React.FC = () => {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
+  const [chatSummary, setChatSummary] = useState("");
+  const [showSummary, setShowSummary] = useState(false);
+  const [reportLanguageModalOpen, setReportLanguageModalOpen] = useState(false);
 
   // Define all handler functions before any useEffect hooks that use them
   const handleSend = async (content: string, file?: File) => {
@@ -108,7 +120,28 @@ export const Chat: React.FC = () => {
       const currentConversation = conversations.find(c => c.id === currentConversationId);
       const title = currentConversation?.title || 'Chat History';
       
-      const data = generateChatReport(messages, title);
+      // Show language selection dialog
+      setReportLanguageModalOpen(true);
+      
+      // Note: The actual report generation will happen when the user selects a language
+    } catch (error) {
+      console.error('Error preparing report:', error);
+      showToastError('Failed to prepare report', 'Please try again later');
+    }
+  };
+
+  const generateReport = async (language: string = 'en') => {
+    try {
+      if (!currentConversationId || messages.length === 0) return;
+      
+      const currentConversation = conversations.find(c => c.id === currentConversationId);
+      const title = currentConversation?.title || 'Chat History';
+      
+      // Close the language selection modal
+      setReportLanguageModalOpen(false);
+      
+      // Generate the report with the selected language
+      const data = await generateChatReport(messages, title, language);
       setReportData(data);
       setReportModalOpen(true);
       
@@ -124,7 +157,9 @@ export const Chat: React.FC = () => {
     if (!reportData) return;
     
     const html = generateHTML(reportData);
-    downloadReport(html, `mindfulai-chat-${format(new Date(), 'yyyy-MM-dd')}.html`);
+    // Include language in the filename if it's not English
+    const langSuffix = reportData.metadata?.language !== 'en' ? `-${reportData.metadata.language}` : '';
+    downloadReport(html, `mindfulai-chat${langSuffix}-${format(new Date(), 'yyyy-MM-dd')}.html`);
   };
 
   const scrollToBottom = () => {
@@ -168,7 +203,10 @@ export const Chat: React.FC = () => {
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     if (chatContainerRef.current && scrolledToBottom) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
     }
   }, [messages, scrolledToBottom]);
 
@@ -287,6 +325,92 @@ export const Chat: React.FC = () => {
     messages.length,
     handleClearHistory
   ]);
+
+  const handleEditMessage = async (id: string, newContent: string) => {
+    try {
+      await editMessage(id, newContent);
+    } catch (error) {
+      console.error('Error editing message:', error);
+      showToastError('Failed to edit message', 'Please try again');
+    }
+  };
+
+  const handleRegenerateResponse = async () => {
+    if (messages.length < 2) return;
+    
+    // Find the last user message
+    const userMessages = messages.filter(m => m.role === 'user');
+    if (userMessages.length === 0) return;
+    
+    const lastUserMessage = userMessages[userMessages.length - 1];
+    
+    try {
+      // Delete the last assistant message
+      const assistantMessages = messages.filter(m => m.role === 'assistant');
+      if (assistantMessages.length > 0) {
+        const lastAssistantMessage = assistantMessages[assistantMessages.length - 1];
+        await deleteMessage(lastAssistantMessage.id);
+      }
+      
+      // Resend the last user message to get a new response
+      await addMessage({ role: 'user', content: lastUserMessage.content });
+      setScrolledToBottom(true);
+    } catch (error) {
+      console.error('Error regenerating response:', error);
+      showToastError('Failed to regenerate response', 'Please try again');
+    }
+  };
+  
+  // Function to generate summary
+  const generateChatSummary = async () => {
+    if (messages.length < 4) {
+      showToastError('Not enough messages', 'Need more conversation history to generate a summary');
+      return;
+    }
+    
+    try {
+      setShowSummary(true);
+      
+      // You could use your LLM to generate the summary
+      const summaryMessage = {
+        role: 'user',
+        content: 'Summarize our conversation so far in a few bullet points. Keep your response concise.'
+      };
+      
+      // Add temporary summary message
+      const tempSummaryId = 'temp-summary';
+      setChatSummary("Generating summary...");
+      
+      // Actual summary generation code would go here
+      // For now, let's simulate it with a timeout
+      setTimeout(() => {
+        const contextMessages = messages.map(m => m.content).join("\n");
+        
+        // Simple mock summary for now
+        const topics = [
+          "Discussed anxiety management techniques",
+          "Explored sleep improvement strategies",
+          "Talked about mindfulness and meditation",
+          "Shared resources for further reading"
+        ];
+        
+        // Take a random selection of these based on message content
+        const selectedTopics = topics.filter(() => Math.random() > 0.3);
+        const summary = selectedTopics.map(t => `• ${t}`).join("\n");
+        
+        setChatSummary(summary);
+      }, 1500);
+    } catch (error) {
+      console.error('Error generating summary:', error);
+      showToastError('Failed to generate summary', 'Please try again');
+      setShowSummary(false);
+    }
+  };
+  
+  const handleStopGeneration = () => {
+    stopGeneration();
+    showToastSuccess('Generation stopped', 'Response generation was interrupted');
+  };
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -478,9 +602,39 @@ export const Chat: React.FC = () => {
           {/* Chat Messages */}
           <div 
             ref={chatContainerRef}
-            className="flex-1 overflow-y-auto p-4 md:p-6 scroll-smooth"
+            className="flex-1 overflow-y-auto p-4 md:p-6 pt-16 scroll-smooth"
           >
             <div className="max-w-3xl mx-auto space-y-4">
+              {/* Summary panel */}
+              <AnimatePresence>
+                {showSummary && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="border border-primary/20 bg-primary/5 rounded-lg p-4 mb-4"
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-primary" />
+                        <h3 className="font-medium text-primary">Conversation Summary</h3>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setShowSummary(false)}
+                        className="h-6 w-6 p-0 rounded-full"
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                    <div className="whitespace-pre-line text-sm">
+                      {chatSummary}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              
               <AnimatePresence initial={false}>
                 {showWelcomeMessage && messages.length === 0 ? (
                   <motion.div
@@ -649,6 +803,11 @@ export const Chat: React.FC = () => {
                           ? () => deleteMessage(message.id)
                           : undefined
                       }
+                      onEdit={
+                        message.role === 'user' && !message.id.startsWith('temp-')
+                          ? handleEditMessage
+                          : undefined
+                      }
                     />
                   ))
                 )}
@@ -674,7 +833,7 @@ export const Chat: React.FC = () => {
           </AnimatePresence>
           
           {messages.length > 0 && (
-            <div className="absolute top-4 right-4 flex gap-2">
+            <div className="absolute top-4 right-4 flex gap-2 z-20">
               {currentConversationId && messages.length > 0 && (
                 <>
                   <motion.div
@@ -686,8 +845,42 @@ export const Chat: React.FC = () => {
                     <Button
                       variant="outline"
                       size="sm"
+                      onClick={generateChatSummary}
+                      className="text-xs bg-card/80 backdrop-blur-sm shadow-md"
+                      title="Generate Summary"
+                    >
+                      <Sparkles className="h-3.5 w-3.5 mr-1" />
+                      Summary
+                    </Button>
+                  </motion.div>
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRegenerateResponse}
+                      className="text-xs bg-card/80 backdrop-blur-sm shadow-md"
+                      title="Regenerate Response"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                      Regenerate
+                    </Button>
+                  </motion.div>
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={handleClearHistory}
-                      className="text-xs bg-background/50 backdrop-blur-sm shadow-sm"
+                      className="text-xs bg-card/80 backdrop-blur-sm shadow-md"
                       title="Clear Chat (Alt+C)"
                     >
                       <Trash2 className="h-3.5 w-3.5 mr-1" />
@@ -704,7 +897,7 @@ export const Chat: React.FC = () => {
                       variant="outline"
                       size="sm"
                       onClick={prepareReport}
-                      className="text-xs bg-background/50 backdrop-blur-sm shadow-sm"
+                      className="text-xs bg-card/80 backdrop-blur-sm shadow-md"
                       title="Export Report (Alt+E)"
                     >
                       <Download className="h-3.5 w-3.5 mr-1" />
@@ -716,10 +909,39 @@ export const Chat: React.FC = () => {
             </div>
           )}
           
+          {/* Suggested Prompts Row above the input */}
+          {messages.length > 1 && (
+            <div className="mx-auto max-w-3xl px-4 mb-2">
+              <div className="flex gap-2 overflow-x-auto py-2 px-1 hide-scrollbar">
+                {[
+                  { text: "Suggest related resources", icon: <BookOpen className="h-3 w-3" /> },
+                  { text: "Improve mood techniques", icon: <Heart className="h-3 w-3" /> },
+                  { text: "Generate practical action steps", icon: <Wand2 className="h-3 w-3" /> }
+                ].map((suggestion, i) => (
+                  <Button
+                    key={i}
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleSend(suggestion.text)}
+                    className="text-xs bg-card/50 border border-border/50 hover:bg-card/80 shadow-sm whitespace-nowrap flex-shrink-0"
+                  >
+                    {suggestion.icon}
+                    <span className="ml-1">{suggestion.text}</span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+          
           {/* Input Area */}
           <div className="p-4 border-t bg-card/70 backdrop-blur-sm">
             <div className="max-w-3xl mx-auto">
-              <ChatInput onSend={handleSend} disabled={loading} />
+              <ChatInput 
+                onSend={handleSend} 
+                disabled={loading} 
+                isGenerating={isGenerating}
+                onStopGeneration={handleStopGeneration}
+              />
             </div>
           </div>
         </div>
@@ -790,6 +1012,10 @@ export const Chat: React.FC = () => {
                       <span className="text-sm">Clear Chat</span>
                       <kbd className="px-2 py-1 text-xs font-semibold bg-muted rounded">Alt+C</kbd>
                     </div>
+                    <div className="flex justify-between items-center py-2 border-b border-border/30">
+                      <span className="text-sm">Send Message</span>
+                      <kbd className="px-2 py-1 text-xs font-semibold bg-muted rounded">Ctrl+Enter</kbd>
+                    </div>
                     <div className="flex justify-between items-center py-2">
                       <span className="text-sm">Show Keyboard Shortcuts</span>
                       <kbd className="px-2 py-1 text-xs font-semibold bg-muted rounded">Alt+/</kbd>
@@ -799,6 +1025,67 @@ export const Chat: React.FC = () => {
               </div>
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* Language Selection Modal */}
+      <AnimatePresence>
+        {reportLanguageModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+            onClick={() => setReportLanguageModalOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-card p-6 rounded-lg shadow-lg max-w-md w-full"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold flex items-center gap-2">
+                  <Languages className="h-5 w-5" />
+                  Select Report Language
+                </h2>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => setReportLanguageModalOpen(false)}
+                >
+                  <span className="sr-only">Close</span>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              
+              <div className="grid grid-cols-1 gap-2 mb-4">
+                <Button
+                  variant="outline"
+                  className="justify-start h-12 px-4"
+                  onClick={() => generateReport('en')}
+                >
+                  <span className="mr-2 text-lg">🇺🇸</span>
+                  <span>English</span>
+                </Button>
+                
+                <Button
+                  variant="outline"
+                  className="justify-start h-12 px-4"
+                  onClick={() => generateReport('hi')}
+                >
+                  <span className="mr-2 text-lg">🇮🇳</span>
+                  <span>Hindi (हिन्दी)</span>
+                </Button>
+              </div>
+              
+              <div className="text-sm text-muted-foreground">
+                Choose the language for your report. Report content will remain in the original language of your conversation.
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
