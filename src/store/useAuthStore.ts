@@ -1,133 +1,162 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import { User } from '@supabase/supabase-js';
+import { logInfo, logError, LogCategory } from '../lib/logging';
 
 interface AuthState {
   user: User | null;
   session: any;
   loading: boolean;
+  error: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<any>;
   signOut: () => Promise<void>;
   setUser: (user: User | null) => void;
   deleteAccount: () => Promise<void>;
+  clearError: () => void;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   session: null,
   loading: true,
+  error: null,
+  
   signIn: async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) throw error;
-  },
-  signUp: async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-    if (error) throw error;
-    return { data, error };
-  },
-  signOut: async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
-    set({ user: null, session: null });
-  },
-  setUser: (user) => set({ user }),
-  deleteAccount: async () => {
+    set({ loading: true, error: null });
+    
     try {
-      const user = (await supabase.auth.getUser()).data.user;
-      if (!user) throw new Error('No user found');
-
-      // First try using the edge function (most secure way)
-      try {
-        const { data: functionData, error: functionError } = await supabase.functions.invoke('delete-user');
-        
-        if (!functionError) {
-          // Successfully deleted via edge function
-          set({ user: null, session: null });
-          return;
-        }
-        
-        // If edge function fails, continue with fallback approaches
-        console.error('Edge function delete failed:', functionError);
-      } catch (edgeFunctionError) {
-        console.error('Error calling edge function:', edgeFunctionError);
-        // Continue with fallback approaches
-      }
-
-      // Fallback 1: Delete user data and try RPC function
-      // Delete all user conversations
-      const { error: convError } = await supabase
-        .from('conversations')
-        .delete()
-        .eq('user_id', user.id);
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
       
-      if (convError) console.error('Error deleting conversations:', convError);
-
-      // Delete all user messages
-      const { error: msgError } = await supabase
-        .from('messages')
-        .delete()
-        .eq('user_id', user.id);
-      
-      if (msgError) console.error('Error deleting messages:', msgError);
-
-      // Delete user profile
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .delete()
-        .eq('id', user.id);
-      
-      if (profileError) console.error('Error deleting profile:', profileError);
-
-      // Fallback 2: Use RPC function to delete the user completely from auth system
-      try {
-        const { error: deleteError } = await supabase.rpc('delete_user');
-        if (!deleteError) {
-          // Successfully deleted via RPC
-          await supabase.auth.signOut();
-          set({ user: null, session: null });
-          return;
-        }
-        console.error('RPC delete failed:', deleteError);
-      } catch (rpcError) {
-        console.error('Error in RPC function:', rpcError);
-      }
-
-      // Fallback 3: Try to make the account unusable
-      try {
-        // Generate a random secure password that even the user won't know
-        const randomPassword = Math.random().toString(36).slice(-10) + 
-                              Math.random().toString(36).slice(-10) + 
-                              Date.now().toString();
-        
-        // Change email to something invalid and randomize password
-        const { error: updateError } = await supabase.auth.updateUser({
-          email: `deleted-${user.id}@deleted-account.invalid`,
-          password: randomPassword,
-          data: { 
-            deleted: true,
-            deletedAt: new Date().toISOString()
-          }
+      if (error) {
+        set({ error: error.message, loading: false });
+        logError(LogCategory.AUTH, "Login failed", null, null, { 
+          email, 
+          error: error.message 
         });
-        
-        if (updateError) throw updateError;
-      } catch (updateError) {
-        console.error('Error updating user:', updateError);
-        throw new Error('Failed to delete account. Please contact support.');
+        return;
       }
-
-      // Sign out after all attempts
-      await supabase.auth.signOut();
-      set({ user: null, session: null });
-    } catch (error) {
-      console.error('Error deleting account:', error);
-      throw error;
+      
+      set({ user: data.user, session: data.session, loading: false });
+      logInfo(LogCategory.AUTH, "User logged in successfully", data.user?.id);
+    } catch (error: any) {
+      set({ error: error.message, loading: false });
+      logError(LogCategory.AUTH, "Login error", null, null, { 
+        email, 
+        error: error.message 
+      });
     }
   },
+  
+  signUp: async (email: string, password: string) => {
+    set({ loading: true, error: null });
+    
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+      
+      if (error) {
+        set({ error: error.message, loading: false });
+        logError(LogCategory.AUTH, "Signup failed", null, null, { 
+          email, 
+          error: error.message 
+        });
+        return { data, error };
+      }
+      
+      set({ user: data.user, session: data.session, loading: false });
+      logInfo(LogCategory.AUTH, "User signed up successfully", data.user?.id);
+      return { data, error };
+    } catch (error: any) {
+      set({ error: error.message, loading: false });
+      logError(LogCategory.AUTH, "Signup error", null, null, { 
+        email, 
+        error: error.message 
+      });
+      return { data: null, error: error.message };
+    }
+  },
+  
+  signOut: async () => {
+    set({ loading: true, error: null });
+    
+    try {
+      // Get the user ID before logging out for logging purposes
+      const userId = get().user?.id;
+      
+      const { error } = await supabase.auth.signOut();
+      
+      if (error) {
+        set({ error: error.message, loading: false });
+        logError(LogCategory.AUTH, "Logout failed", userId, null, { 
+          error: error.message 
+        });
+        return;
+      }
+      
+      set({ user: null, session: null, loading: false });
+      logInfo(LogCategory.AUTH, "User logged out successfully", userId);
+    } catch (error: any) {
+      set({ error: error.message, loading: false });
+      logError(LogCategory.AUTH, "Logout error", get().user?.id, null, { 
+        error: error.message 
+      });
+    }
+  },
+  
+  setUser: (user) => set({ user }),
+  
+  deleteAccount: async () => {
+    set({ loading: true, error: null });
+    
+    try {
+      const userId = get().user?.id;
+      if (!userId) {
+        set({ error: "User not authenticated", loading: false });
+        logError(LogCategory.AUTH, "Delete account failed - user not authenticated", null);
+        return;
+      }
+      
+      // Delete user's data
+      const { error: deleteError } = await supabase
+        .from('users_data')
+        .delete()
+        .eq('user_id', userId);
+        
+      if (deleteError) {
+        console.error('Error deleting user data:', deleteError);
+        logError(LogCategory.AUTH, "Failed to delete user data", userId, null, { 
+          error: deleteError.message 
+        });
+      }
+      
+      // Delete the account
+      const { error } = await supabase.auth.admin.deleteUser(userId);
+      
+      if (error) {
+        set({ error: error.message, loading: false });
+        logError(LogCategory.AUTH, "Failed to delete account", userId, null, { 
+          error: error.message 
+        });
+        return;
+      }
+      
+      // Sign out after successful deletion
+      await supabase.auth.signOut();
+      set({ user: null, session: null, loading: false });
+      logInfo(LogCategory.AUTH, "Account deleted successfully", userId);
+    } catch (error: any) {
+      set({ error: error.message, loading: false });
+      logError(LogCategory.AUTH, "Account deletion error", get().user?.id, null, { 
+        error: error.message 
+      });
+    }
+  },
+  
+  clearError: () => set({ error: null }),
 }));

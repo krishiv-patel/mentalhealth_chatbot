@@ -10,12 +10,24 @@ export interface Message {
       url: string;
       size: number;
     };
+    // Encryption fields
+    isEncrypted: boolean;
+    encryptedContent?: string;
+    nonce?: string;
+}
+
+// Interface for encrypted message data
+export interface EncryptedData {
+  encryptedData: string;
+  nonce: string;
 }
 
 export interface Conversation {
   id: string;
   title: string;
   updatedAt: string;
+  // Add public key for the conversation
+  publicKey?: string;
 }
 
 // Add global window interface extension

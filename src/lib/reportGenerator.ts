@@ -174,251 +174,452 @@ const translations = {
 };
 
 export function generateHTML(report: ChatReport): string {
-  const lang = report.metadata.language || 'en';
-  const t = translations[lang as keyof typeof translations] || translations.en;
-
+  const t = translations[report.metadata.language as keyof typeof translations] || translations.en;
+  
   return `
-    <!DOCTYPE html>
-    <html lang="${lang}">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>${t.title} - ${report.title}</title>
-        <style>
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-                line-height: 1.6;
-                max-width: 800px;
-                margin: 0 auto;
-                padding: 2rem;
-                background: #f7f7f7;
-                color: #333;
-            }
-            .header {
-                text-align: center;
-                margin-bottom: 2rem;
-                padding: 2rem;
-                background: #fff;
-                border-radius: 10px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-            .stats {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 1rem;
-                margin-bottom: 2rem;
-                padding: 1rem;
-                background: #fff;
-                border-radius: 10px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-            .stat-item {
-                padding: 1rem;
-                text-align: center;
-                border: 1px solid #eee;
-                border-radius: 5px;
-            }
-            .stat-value {
-                font-size: 1.5rem;
-                font-weight: bold;
-                color: #2563eb;
-            }
-            .user-profile {
-                background: #fff;
-                padding: 2rem;
-                border-radius: 10px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                margin-bottom: 2rem;
-                display: flex;
-                flex-wrap: wrap;
-                gap: 1rem;
-            }
-            .user-avatar {
-                width: 100px;
-                height: 100px;
-                border-radius: 50%;
-                object-fit: cover;
-                border: 3px solid #eee;
-            }
-            .user-info {
-                flex: 1;
-                min-width: 200px;
-            }
-            .user-info h3 {
-                margin-top: 0;
-                color: #2563eb;
-            }
-            .info-grid {
-                display: grid;
-                grid-template-columns: max-content 1fr;
-                gap: 0.5rem;
-            }
-            .info-label {
-                font-weight: bold;
-                color: #666;
-            }
-            .metadata {
-                background: #fff;
-                padding: 1.5rem;
-                border-radius: 10px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                margin-bottom: 2rem;
-            }
-            .metadata h3 {
-                margin-top: 0;
-                color: #2563eb;
-            }
-            .messages {
-                background: #fff;
-                padding: 2rem;
-                border-radius: 10px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-            .message {
-                margin-bottom: 1.5rem;
-                padding: 1rem;
-                border-radius: 5px;
-            }
-            .message.user {
-                background: #f0f9ff;
-                margin-left: 2rem;
-            }
-            .message.assistant {
-                background: #f0fdf4;
-                margin-right: 2rem;
-            }
-            .message-header {
-                display: flex;
-                justify-content: space-between;
-                margin-bottom: 0.5rem;
-                font-size: 0.875rem;
-                color: #666;
-            }
-            .message-content {
-                white-space: pre-wrap;
-            }
-            .attachment {
-                margin-top: 0.5rem;
-                padding: 0.5rem;
-                background: #f8fafc;
-                border: 1px solid #e2e8f0;
-                border-radius: 4px;
-                font-size: 0.875rem;
-            }
-            .footer {
-                text-align: center;
-                margin-top: 2rem;
-                padding: 1rem;
-                color: #666;
-                font-size: 0.875rem;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="header">
-            <h1>${report.title}</h1>
-            <p>${t.generatedOn} ${report.timestamp}</p>
+  <!DOCTYPE html>
+  <html lang="${report.metadata.language || 'en'}">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${report.title} - ${t.title}</title>
+    <style>
+      :root {
+        --primary-color: #4f46e5;
+        --secondary-color: #8b5cf6;
+        --accent-color: #ec4899;
+        --background-color: #f8fafc;
+        --card-color: #ffffff;
+        --text-color: #1e293b;
+        --text-muted: #64748b;
+        --border-color: #e2e8f0;
+      }
+      
+      /* Enable dark mode support */
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --primary-color: #6366f1;
+          --secondary-color: #a78bfa;
+          --accent-color: #f472b6;
+          --background-color: #0f172a;
+          --card-color: #1e293b;
+          --text-color: #f1f5f9;
+          --text-muted: #94a3b8;
+          --border-color: #334155;
+        }
+      }
+      
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      }
+      
+      body {
+        background-color: var(--background-color);
+        color: var(--text-color);
+        line-height: 1.6;
+        padding: 0;
+        margin: 0;
+      }
+      
+      a {
+        color: var(--primary-color);
+        text-decoration: none;
+      }
+      
+      a:hover {
+        text-decoration: underline;
+      }
+      
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem;
+      }
+      
+      .header {
+        position: relative;
+        background: linear-gradient(to right, var(--primary-color), var(--secondary-color));
+        color: white;
+        border-radius: 12px;
+        padding: 2rem;
+        margin-bottom: 2rem;
+        overflow: hidden;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+      }
+      
+      .header::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        right: -50%;
+        width: 100%;
+        height: 200%;
+        background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 70%);
+        transform: rotate(30deg);
+      }
+      
+      .header h1 {
+        font-size: 2.5rem;
+        margin-bottom: 0.5rem;
+        font-weight: 700;
+        position: relative;
+        z-index: 1;
+      }
+      
+      .header p {
+        opacity: 0.9;
+        position: relative;
+        z-index: 1;
+      }
+      
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+      }
+      
+      .stat-card {
+        background-color: var(--card-color);
+        border-radius: 10px;
+        padding: 1.5rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        border: 1px solid var(--border-color);
+        transition: transform 0.2s ease;
+      }
+      
+      .stat-card:hover {
+        transform: translateY(-5px);
+      }
+      
+      .stat-card h3 {
+        font-size: 0.9rem;
+        color: var(--text-muted);
+        margin-bottom: 0.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      
+      .stat-card .value {
+        font-size: 2rem;
+        font-weight: 700;
+        color: var(--primary-color);
+      }
+      
+      .stat-card .details {
+        font-size: 0.9rem;
+        color: var(--text-muted);
+        margin-top: 0.5rem;
+      }
+      
+      .section {
+        background-color: var(--card-color);
+        border-radius: 10px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        border: 1px solid var(--border-color);
+      }
+      
+      .section h2 {
+        font-size: 1.5rem;
+        margin-bottom: 1.5rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--border-color);
+        font-weight: 600;
+      }
+      
+      .profile-section {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 1rem;
+      }
+      
+      .profile-item {
+        margin-bottom: 0.5rem;
+      }
+      
+      .profile-item label {
+        display: block;
+        font-size: 0.9rem;
+        color: var(--text-muted);
+        margin-bottom: 0.25rem;
+      }
+      
+      .profile-item span {
+        font-weight: 500;
+      }
+      
+      .chat-message {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+      }
+      
+      .avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        font-size: 0.85rem;
+        flex-shrink: 0;
+      }
+      
+      .user-avatar {
+        background-color: rgba(79, 70, 229, 0.1);
+        color: var(--primary-color);
+      }
+      
+      .assistant-avatar {
+        background-color: rgba(139, 92, 246, 0.1);
+        color: var(--secondary-color);
+      }
+      
+      .message-content {
+        flex: 1;
+      }
+      
+      .message-meta {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.85rem;
+        margin-bottom: 0.25rem;
+        color: var(--text-muted);
+      }
+      
+      .message-bubble {
+        padding: 1rem;
+        border-radius: 0.75rem;
+        line-height: 1.6;
+        white-space: pre-wrap;
+      }
+      
+      .user-bubble {
+        background-color: rgba(79, 70, 229, 0.07);
+        border: 1px solid rgba(79, 70, 229, 0.1);
+      }
+      
+      .assistant-bubble {
+        background-color: rgba(139, 92, 246, 0.07);
+        border: 1px solid rgba(139, 92, 246, 0.1);
+      }
+      
+      .attachment {
+        margin-top: 0.75rem;
+        padding: 0.75rem;
+        background-color: var(--background-color);
+        border-radius: 0.5rem;
+        font-size: 0.9rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      
+      .attachment-icon {
+        color: var(--text-muted);
+      }
+      
+      .metadata-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 1rem;
+      }
+      
+      .footer {
+        text-align: center;
+        margin-top: 3rem;
+        padding: 1.5rem;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+      }
+      
+      .logo {
+        height: 30px;
+        margin-bottom: 1rem;
+      }
+      
+      @media print {
+        body {
+          background-color: white;
+        }
+        
+        .container {
+          max-width: 100%;
+          padding: 0;
+        }
+        
+        .header {
+          border-radius: 0;
+        }
+        
+        .section, .stat-card {
+          break-inside: avoid;
+        }
+      }
+      
+      @media (max-width: 768px) {
+        .container {
+          padding: 1rem;
+        }
+        
+        .stats-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+        
+        .profile-section {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>${report.title}</h1>
+        <p>${t.generatedOn} ${report.timestamp}</p>
+      </div>
+      
+      <div class="stats-grid">
+        <div class="stat-card">
+          <h3>${t.totalMessages}</h3>
+          <div class="value">${report.stats.totalMessages}</div>
+          <div class="details">
+            ${report.stats.userMessages} ${t.userMessages}, 
+            ${report.stats.assistantMessages} ${t.assistantMessages}
+          </div>
         </div>
         
-        ${report.user ? `
-        <div class="user-profile">
-            ${report.user.avatarUrl ? `
-                <img src="${report.user.avatarUrl}" alt="User avatar" class="user-avatar">
-            ` : ''}
-            <div class="user-info">
-                <h3>${t.userProfile}</h3>
-                <div class="info-grid">
-                    <div class="info-label">${t.email}:</div>
-                    <div>${report.user.email}</div>
-                    ${report.user.username ? `
-                        <div class="info-label">${t.username}:</div>
-                        <div>${report.user.username}</div>
-                    ` : ''}
-                    ${report.user.fullName ? `
-                        <div class="info-label">${t.fullName}:</div>
-                        <div>${report.user.fullName}</div>
-                    ` : ''}
-                    ${report.user.gender ? `
-                        <div class="info-label">${t.gender}:</div>
-                        <div>${report.user.gender}</div>
-                    ` : ''}
-                    ${report.user.dateOfBirth ? `
-                        <div class="info-label">${t.dateOfBirth}:</div>
-                        <div>${report.user.dateOfBirth}</div>
-                    ` : ''}
+        <div class="stat-card">
+          <h3>${t.avgResponseTime}</h3>
+          <div class="value">${report.stats.averageResponseTime}</div>
+        </div>
+        
+        <div class="stat-card">
+          <h3>${t.totalDuration}</h3>
+          <div class="value">${report.stats.totalDuration}</div>
+        </div>
+        
+        <div class="stat-card">
+          <h3>${t.attachments}</h3>
+          <div class="value">${report.stats.attachments}</div>
+        </div>
+      </div>
+      
+      ${report.user ? `
+      <div class="section">
+        <h2>${t.userProfile}</h2>
+        <div class="profile-section">
+          ${report.user.email ? `
+          <div class="profile-item">
+            <label>${t.email}</label>
+            <span>${report.user.email}</span>
+          </div>
+          ` : ''}
+          
+          ${report.user.username ? `
+          <div class="profile-item">
+            <label>${t.username}</label>
+            <span>${report.user.username}</span>
+          </div>
+          ` : ''}
+          
+          ${report.user.fullName ? `
+          <div class="profile-item">
+            <label>${t.fullName}</label>
+            <span>${report.user.fullName}</span>
+          </div>
+          ` : ''}
+          
+          ${report.user.gender ? `
+          <div class="profile-item">
+            <label>${t.gender}</label>
+            <span>${report.user.gender}</span>
+          </div>
+          ` : ''}
+          
+          ${report.user.dateOfBirth ? `
+          <div class="profile-item">
+            <label>${t.dateOfBirth}</label>
+            <span>${report.user.dateOfBirth}</span>
+          </div>
+          ` : ''}
+        </div>
+      </div>
+      ` : ''}
+      
+      <div class="section">
+        <h2>${t.title}</h2>
+        <div class="chat-messages">
+          ${report.messages.map(message => `
+          <div class="chat-message">
+            <div class="avatar ${message.role === 'user' ? 'user-avatar' : 'assistant-avatar'}">
+              ${message.role === 'user' ? 'U' : 'A'}
+            </div>
+            <div class="message-content">
+              <div class="message-meta">
+                <span>${message.role === 'user' ? t.user : t.assistant}</span>
+                <span>${format(new Date(message.timestamp), 'h:mm:ss a')}</span>
+              </div>
+              <div class="message-bubble ${message.role === 'user' ? 'user-bubble' : 'assistant-bubble'}">
+                ${message.content.replace(/\n/g, '<br>')}
+                ${message.attachment ? `
+                <div class="attachment">
+                  <span class="attachment-icon">📎</span>
+                  ${message.attachment.name} (${formatFileSize(message.attachment.size)})
                 </div>
+                ` : ''}
+              </div>
             </div>
+          </div>
+          `).join('')}
         </div>
-        ` : ''}
-        
-        <div class="metadata">
-            <h3>${t.reportMetadata}</h3>
-            <div class="info-grid">
-                <div class="info-label">${t.generatedAt}:</div>
-                <div>${report.metadata.generatedAt}</div>
-                <div class="info-label">${t.language}:</div>
-                <div>${report.metadata.language === 'hi' ? 'Hindi' : 'English'}</div>
-                <div class="info-label">${t.reportVersion}:</div>
-                <div>${report.metadata.reportVersion}</div>
-                <div class="info-label">${t.platform}:</div>
-                <div>${report.metadata.platform}</div>
-                <div class="info-label">${t.browserInfo}:</div>
-                <div>${report.metadata.browserInfo}</div>
-            </div>
+      </div>
+      
+      <div class="section">
+        <h2>${t.reportMetadata}</h2>
+        <div class="metadata-grid">
+          <div class="profile-item">
+            <label>${t.generatedAt}</label>
+            <span>${report.metadata.generatedAt}</span>
+          </div>
+          
+          <div class="profile-item">
+            <label>${t.language}</label>
+            <span>${report.metadata.language === 'en' ? 'English' : report.metadata.language === 'hi' ? 'Hindi' : report.metadata.language}</span>
+          </div>
+          
+          <div class="profile-item">
+            <label>${t.reportVersion}</label>
+            <span>${report.metadata.reportVersion}</span>
+          </div>
+          
+          <div class="profile-item">
+            <label>${t.platform}</label>
+            <span>${report.metadata.platform}</span>
+          </div>
         </div>
-        
-        <div class="stats">
-            <div class="stat-item">
-                <div class="stat-value">${report.stats.totalMessages}</div>
-                <div>${t.totalMessages}</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-value">${report.stats.userMessages}</div>
-                <div>${t.userMessages}</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-value">${report.stats.assistantMessages}</div>
-                <div>${t.assistantMessages}</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-value">${report.stats.attachments}</div>
-                <div>${t.attachments}</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-value">${report.stats.averageResponseTime}</div>
-                <div>${t.avgResponseTime}</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-value">${report.stats.totalDuration}</div>
-                <div>${t.totalDuration}</div>
-            </div>
-        </div>
-
-        <div class="messages">
-            ${report.messages.map(message => `
-                <div class="message ${message.role}">
-                    <div class="message-header">
-                        <span>${message.role === 'user' ? t.user : t.assistant}</span>
-                        <span>${format(new Date(message.timestamp), 'PPpp')}</span>
-                    </div>
-                    <div class="message-content">${message.content}</div>
-                    ${message.attachment ? `
-                        <div class="attachment">
-                            📎 ${t.attachment}: ${message.attachment.name} (${Math.round(message.attachment.size / 1024)}KB)
-                            <br>
-                            <a href="${message.attachment.url}" target="_blank">${t.download}</a>
-                        </div>
-                    ` : ''}
-                </div>
-            `).join('')}
-        </div>
-
-        <div class="footer">
-            <p>${t.generatedBy}</p>
-        </div>
-    </body>
-    </html>
+      </div>
+      
+      <div class="footer">
+        <p>${t.generatedBy}</p>
+      </div>
+    </div>
+  </body>
+  </html>
   `;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function downloadReport(html: string, filename: string) {

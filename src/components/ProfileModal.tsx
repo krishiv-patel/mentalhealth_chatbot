@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, X, Edit, Calendar, Users, Save, Trash2, AlertTriangle, AlertCircle, Image, RefreshCw, Upload, Loader2 } from 'lucide-react';
+import { User, X, Edit, Calendar, Users, Save, Trash2, AlertTriangle, AlertCircle, Image, RefreshCw, Upload, Loader2, Lock, Unlock } from 'lucide-react';
 import { Button } from './ui/Button';
 import { cn } from '../lib/utils';
 import { useProfileStore } from '../store/useProfileStore';
 import { useAuthStore } from '../store/useAuthStore';
+import { useChatStore } from '../store/useChatStore';
 import UserType from '@supabase/supabase-js';
 
 interface ProfileModalProps {
@@ -28,6 +29,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ user, isOpen, onClose }) =>
   
   const { profile, fetchProfile, updateProfile, loading } = useProfileStore();
   const { deleteAccount } = useAuthStore();
+  const { isEncryptionEnabled, isEncryptionInitialized, toggleEncryption, initializeEncryption } = useChatStore();
   
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -156,6 +158,16 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ user, isOpen, onClose }) =>
     } catch (error: any) {
       setIsDeleting(false);
       setDeleteError(error.message || 'Failed to delete account. Please try again.');
+    }
+  };
+
+  const handleToggleEncryption = async () => {
+    if (!isEncryptionInitialized) {
+      // First initialize encryption
+      await initializeEncryption();
+    } else {
+      // Toggle current encryption state
+      toggleEncryption(!isEncryptionEnabled);
     }
   };
 
@@ -480,6 +492,40 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ user, isOpen, onClose }) =>
                       </>
                     )}
                     
+                    {/* Encryption Settings */}
+                    <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
+                      <h3 className="text-lg font-medium mb-2 flex items-center">
+                        {isEncryptionEnabled ? <Lock className="w-4 h-4 mr-2" /> : <Unlock className="w-4 h-4 mr-2" />}
+                        End-to-End Encryption
+                      </h3>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                        {isEncryptionEnabled 
+                          ? "Your messages are encrypted and can only be read by you." 
+                          : "Enable encryption to protect your messages."}
+                      </p>
+                      <div className="flex items-center">
+                        <button
+                          onClick={handleToggleEncryption}
+                          className={cn(
+                            "relative inline-flex h-6 w-11 items-center rounded-full",
+                            isEncryptionEnabled 
+                              ? "bg-emerald-600" 
+                              : "bg-gray-300 dark:bg-gray-600"
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "inline-block h-4 w-4 transform rounded-full bg-white transition",
+                              isEncryptionEnabled ? "translate-x-6" : "translate-x-1"
+                            )}
+                          />
+                        </button>
+                        <span className="ml-2 text-sm">
+                          {isEncryptionEnabled ? "Enabled" : "Disabled"}
+                        </span>
+                      </div>
+                    </div>
+
                     <div className="pt-6 mt-6 border-t border-zinc-200 dark:border-zinc-700">
                       <Button
                         variant="destructive"

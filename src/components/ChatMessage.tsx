@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Pencil, Trash2, BrainCircuit, X, Image, Maximize } from 'lucide-react';
+import { User, Pencil, Trash2, BrainCircuit, X, Image, Maximize, FileText, ArrowDown } from 'lucide-react';
 import { Button } from './ui/Button';
 import { cn } from '../lib/utils';
 import ReactMarkdown from 'react-markdown';
@@ -8,7 +8,14 @@ import { format } from 'date-fns';
 import { CodeBlock } from './CodeBlock';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Message } from '../types';
-import type { Components } from 'react-markdown/lib/ast-to-react';
+
+// Define types for ReactMarkdown components props
+interface MarkdownComponentProps {
+  a: React.FC<{ href?: string; children: React.ReactNode }>;
+  pre: React.FC<{ children: React.ReactNode }>;
+  code: React.FC<{ inline?: boolean; className?: string; children: React.ReactNode }>;
+  img: React.FC<{ src?: string; alt?: string }>;
+}
 
 interface ChatMessageProps {
   role: 'user' | 'assistant' | 'system';
@@ -20,32 +27,11 @@ interface ChatMessageProps {
   onDelete?: (id: string) => void;
   className?: string;
   attachment?: {
+    type?: string;
     name: string;
     url: string;
     size: number;
-    type: string;
   };
-}
-
-// Define types for ReactMarkdown components props
-interface LinkProps {
-  href?: string;
-  children: React.ReactNode;
-}
-
-interface CodeProps {
-  inline?: boolean;
-  className?: string;
-  children: React.ReactNode;
-}
-
-interface ImageProps {
-  src?: string;
-  alt?: string;
-}
-
-interface PreProps {
-  children: React.ReactNode;
 }
 
 export const ChatMessage: React.FC<ChatMessageProps> = ({
@@ -102,7 +88,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 
   // Check if content contains image URLs
   const hasImageUrls = content.match(/!\[.*?\]\((.*?)\)/g);
-  const isAttachmentImage = attachment?.type.startsWith('image/');
+  const isAttachmentImage = attachment?.type?.startsWith('image/');
 
   return (
     <div 
@@ -223,109 +209,290 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
             "prose prose-sm dark:prose-invert max-w-none",
             role === "assistant" && "prose-p:leading-relaxed prose-pre:my-3 prose-pre:bg-card prose-pre:border"
           )}>
-            {/* Display attached image with lightbox support */}
-            {isAttachmentImage && attachment && (
-              <div 
-                className="relative group mb-1 inline-block cursor-pointer"
-                onClick={() => openLightbox(attachment.url, attachment.name)}
+            {/* For normal text content */}
+            {!attachment && (
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  a: ({ href, children }: { href?: string; children: React.ReactNode }) => (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary underline hover:no-underline"
+                    >
+                      {children}
+                    </a>
+                  ),
+                  pre: ({ children }: { children: React.ReactNode }) => <div className="not-prose">{children}</div>,
+                  code: ({ inline, className, children }: { inline?: boolean; className?: string; children: React.ReactNode }) => {
+                    const match = /language-(\w+)/.exec(className || "");
+                    if (inline) {
+                      return <code className="bg-muted px-1 py-0.5 rounded text-sm font-mono">{children}</code>;
+                    }
+                    return (
+                      <CodeBlock
+                        language={match ? match[1] : "text"}
+                        code={String(children).replace(/\n$/, "")}
+                      />
+                    );
+                  },
+                  img: ({ src, alt }: { src?: string; alt?: string }) => {
+                    if (!src) return null;
+                    return (
+                      <div className="relative group cursor-pointer inline-block" onClick={() => openLightbox(src || '', alt || 'Image')}>
+                        <img
+                          src={src}
+                          alt={alt || 'Image'}
+                          className="max-h-[150px] max-w-full object-contain rounded-md my-1 border border-border/50"
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="bg-black/40 p-1.5 rounded-full">
+                            <Maximize className="h-4 w-4 text-white" />
+                          </div>
+                        </div>
+                        {alt && alt !== 'Image' && (
+                          <div className="absolute bottom-0 left-0 right-0 bg-black/60 py-0.5 px-1 text-[10px] text-white/90 truncate">
+                            {alt}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                }}
               >
-                <img 
-                  src={attachment.url} 
-                  alt={attachment.name} 
-                  className="max-h-[150px] max-w-full object-contain rounded-md border border-border/50"
-                />
-                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <div className="bg-black/40 p-1.5 rounded-full">
-                    <Maximize className="h-4 w-4 text-white" />
-                  </div>
-                </div>
-                <div className="absolute bottom-0 left-0 right-0 bg-black/60 py-0.5 px-1 text-[10px] text-white/90 truncate">
-                  {attachment.name}
-                </div>
-              </div>
+                {content}
+              </ReactMarkdown>
             )}
             
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                a: ({ href, children }) => (
-                  <a
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary underline hover:no-underline"
+            {/* For user with attachment */}
+            {attachment && role === 'user' && (
+              <>
+                <div className="mb-2">{content}</div>
+                {(attachment.type === 'image' || (attachment.name && attachment.name.match(/\.(jpeg|jpg|gif|png)$/i))) ? (
+                  <div 
+                    className="relative group inline-block cursor-pointer overflow-hidden rounded-md border border-border max-w-full mb-1"
+                    onClick={() => openLightbox(attachment.url, attachment.name)}
                   >
-                    {children}
-                  </a>
-                ),
-                pre: ({ children }) => <div className="not-prose">{children}</div>,
-                code: ({ inline, className, children }) => {
-                  const match = /language-(\w+)/.exec(className || "");
-                  if (inline) {
-                    return <code className="bg-muted px-1 py-0.5 rounded text-sm font-mono">{children}</code>;
-                  }
-                  return (
-                    <CodeBlock
-                      language={match ? match[1] : "text"}
-                      code={String(children).replace(/\n$/, "")}
+                    <img 
+                      src={attachment.url} 
+                      alt={attachment.name} 
+                      className="max-h-[120px] max-w-full object-contain"
                     />
-                  );
-                },
-                img: ({ src, alt }) => {
-                  if (!src) return null;
-                  return (
-                    <div className="relative group cursor-pointer inline-block" onClick={() => openLightbox(src || '', alt || 'Image')}>
-                      <img
-                        src={src}
-                        alt={alt || 'Image'}
-                        className="max-h-[150px] max-w-full object-contain rounded-md my-1 border border-border/50"
+                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="bg-black/40 p-1.5 rounded-full">
+                        <Maximize className="h-4 w-4 text-white" />
+                      </div>
+                    </div>
+                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 py-0.5 px-1 text-xs text-white/90 truncate">
+                      {attachment.name} ({formatFileSize(attachment.size)})
+                    </div>
+                  </div>
+                ) : (
+                  <div 
+                    className="flex items-center gap-2 p-2 bg-muted/30 rounded-md border border-border/50 text-sm hover:bg-muted/50 cursor-pointer"
+                    onClick={() => {
+                      window.open(attachment.url, '_blank');
+                    }}
+                  >
+                    <div className="bg-primary/10 p-2 rounded-md">
+                      <FileIcon type={attachment.type || attachment.name.split('.').pop() || ''} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium truncate">{attachment.name}</div>
+                      <div className="text-xs text-muted-foreground">{formatFileSize(attachment.size)}</div>
+                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const link = document.createElement('a');
+                        link.href = attachment.url;
+                        link.download = attachment.name;
+                        link.click();
+                      }}
+                      className="h-7 w-7 p-0 rounded-full"
+                    >
+                      <ArrowDown className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+            
+            {/* For assistant with attachment */}
+            {attachment && role === 'assistant' && (
+              <>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    a: ({ href, children }: { href?: string; children: React.ReactNode }) => (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary underline hover:no-underline"
+                      >
+                        {children}
+                      </a>
+                    ),
+                    pre: ({ children }: { children: React.ReactNode }) => <div className="not-prose">{children}</div>,
+                    code: ({ inline, className, children }: { inline?: boolean; className?: string; children: React.ReactNode }) => {
+                      const match = /language-(\w+)/.exec(className || "");
+                      if (inline) {
+                        return <code className="bg-muted px-1 py-0.5 rounded text-sm font-mono">{children}</code>;
+                      }
+                      return (
+                        <CodeBlock
+                          language={match ? match[1] : "text"}
+                          code={String(children).replace(/\n$/, "")}
+                        />
+                      );
+                    }
+                  }}
+                >
+                  {content}
+                </ReactMarkdown>
+                
+                {/* Display attached image with lightbox support */}
+                {(attachment.type === 'image' || (attachment.name && attachment.name.match(/\.(jpeg|jpg|gif|png)$/i))) && (
+                  <div className="mb-2 mt-1">
+                    <div 
+                      className="relative group inline-block cursor-pointer overflow-hidden rounded-md border border-border max-w-full"
+                      onClick={() => openLightbox(attachment.url, attachment.name)}
+                    >
+                      <img 
+                        src={attachment.url} 
+                        alt={attachment.name} 
+                        className="max-h-[150px] max-w-full object-contain"
                       />
                       <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                         <div className="bg-black/40 p-1.5 rounded-full">
                           <Maximize className="h-4 w-4 text-white" />
                         </div>
                       </div>
-                      {alt && alt !== 'Image' && (
-                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 py-0.5 px-1 text-[10px] text-white/90 truncate">
-                          {alt}
-                        </div>
-                      )}
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/60 py-0.5 px-1 text-xs text-white/90 truncate">
+                        {formatFileSize(attachment.size)}
+                      </div>
                     </div>
-                  );
-                }
-              } as Components}
-            >
-              {content}
-            </ReactMarkdown>
+                  </div>
+                )}
+                
+                {/* Show attachment for non-image files */}
+                {!(attachment.type === 'image' || (attachment.name && attachment.name.match(/\.(jpeg|jpg|gif|png)$/i))) && (
+                  <div className="mt-2 flex items-center gap-2 p-2 bg-muted/30 rounded-md border border-border/50 text-sm">
+                    <div className="bg-primary/10 p-2 rounded-md">
+                      <FileIcon type={attachment.type || attachment.name.split('.').pop() || ''} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium truncate">{attachment.name}</div>
+                      <div className="text-xs text-muted-foreground">{formatFileSize(attachment.size)}</div>
+                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => {
+                        const link = document.createElement('a');
+                        link.href = attachment.url;
+                        link.download = attachment.name;
+                        link.click();
+                      }}
+                      className="h-7 w-7 p-0 rounded-full"
+                    >
+                      <ArrowDown className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>
       
-      {!isEditing && role === "user" && (
-        <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -right-2 top-2 flex flex-col gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 rounded-full hover:bg-muted/70 bg-card/80 shadow-md p-0"
-            onClick={() => setIsEditing(true)}
+      {/* Message actions */}
+      <AnimatePresence>
+        {!isEditing && !isTemporary && onEdit && onDelete && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute right-0 top-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1"
           >
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      )}
-      
-      {role !== "user" && onDelete && !isTemporary && !isEditing && (
-        <div className="flex items-center justify-end mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => onDelete(id)}
-            className="h-6 w-6 p-0 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-          >
-            <Trash2 className="h-3 w-3" />
-          </Button>
-        </div>
-      )}
+            <Button 
+              size="sm" 
+              variant="ghost"
+              onClick={handleEdit}
+              className="h-7 w-7 p-0 rounded-full"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+            <Button 
+              size="sm" 
+              variant="ghost"
+              onClick={() => onDelete(id)}
+              className="h-7 w-7 p-0 rounded-full"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
+};
+
+// Helper function to format file size
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' bytes';
+  else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  else return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+// Component to display appropriate file icon based on type
+const FileIcon: React.FC<{type: string}> = ({ type }) => {
+  // Handle both MIME types and file extensions
+  const fileType = type.toLowerCase();
+  
+  // Check for image types
+  if (fileType.startsWith('image/') || fileType.match(/\.(jpg|jpeg|png|gif|bmp|webp)$/i)) {
+    return <Image className="h-4 w-4" />;
+  }
+  
+  // Check for PDF
+  if (fileType === 'application/pdf' || fileType === 'pdf') {
+    return <FileText className="h-4 w-4 text-red-500" />;
+  }
+  
+  // Check for document types
+  if (
+    fileType.includes('document') || 
+    fileType.includes('word') || 
+    fileType.includes('office') ||
+    fileType.match(/\.(doc|docx|txt|rtf|odt)$/i)
+  ) {
+    return <FileText className="h-4 w-4 text-blue-500" />;
+  }
+  
+  // Check for spreadsheet types
+  if (
+    fileType.includes('spreadsheet') || 
+    fileType.includes('excel') || 
+    fileType.includes('csv') ||
+    fileType.match(/\.(xls|xlsx|csv|ods)$/i)
+  ) {
+    return <FileText className="h-4 w-4 text-green-500" />;
+  }
+  
+  // Check for presentation types
+  if (
+    fileType.includes('presentation') || 
+    fileType.includes('powerpoint') ||
+    fileType.match(/\.(ppt|pptx|odp)$/i)
+  ) {
+    return <FileText className="h-4 w-4 text-orange-500" />;
+  }
+  
+  // Default
+  return <FileText className="h-4 w-4" />;
 };

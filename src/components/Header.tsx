@@ -14,7 +14,8 @@ import {
   Moon,
   Menu,
   X,
-  History as HistoryIcon
+  History as HistoryIcon,
+  FileText
 } from 'lucide-react';
 import { useTheme } from './ThemeProvider';
 import { useProfileStore } from '../store/useProfileStore';
@@ -171,6 +172,10 @@ export const Header: React.FC = () => {
                           <HistoryIcon className="h-4 w-4" />
                           <span>History</span>
                         </Link>
+                        <Link to="/logs" className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-muted/50 transition-colors">
+                          <FileText className="h-4 w-4" />
+                          <span>Activity Logs</span>
+                        </Link>
                         <div className="border-t border-border/20 mt-1">
                           <button 
                             onClick={signOut}
@@ -259,6 +264,15 @@ export const Header: React.FC = () => {
               onClick={() => document.body.classList.remove('mobile-menu-open')}
             >
               History
+            </Link>
+          )}
+          {user && (
+            <Link 
+              to="/logs" 
+              className="text-lg font-medium w-full text-center py-3 hover:bg-muted rounded-lg transition-colors"
+              onClick={() => document.body.classList.remove('mobile-menu-open')}
+            >
+              Activity Logs
             </Link>
           )}
           <Link 

@@ -1,15 +1,47 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
-import { getChatCompletionStream } from '../lib/lmstudio';
-import type { Message } from '../types';
+import { getChatCompletionStream, LLMMessage, CompletionOptions } from '../lib/lmstudio';
+import type { Message, EncryptedData } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { 
+  encryptForStorage, 
+  decryptFromStorage,
+  hasEncryptionKeys,
+  initializeEncryption
+} from '../lib/encryption';
+import { 
+  setupUserEncryption, 
+  getUserPublicKey, 
+  getServerPublicKey
+} from '../lib/encryptionManager';
+import {
+  logInfo,
+  logError,
+  logWarning,
+  LogCategory
+} from '../lib/logging';
+
+// Utility function to ensure message has proper types
+function createMessage(msg: any): Message {
+  return {
+    id: msg.id || uuidv4(),
+    role: msg.role as 'user' | 'assistant' | 'system',
+    content: msg.content || '',
+    timestamp: msg.timestamp || new Date().toISOString(),
+    conversation_id: msg.conversation_id,
+    attachment: msg.attachment,
+    isEncrypted: msg.isEncrypted === true || msg.is_encrypted === true ? true : false
+  };
+}
 
 interface ChatState {
   messages: Message[];
   loading: boolean;
   currentConversationId: string | null;
-  conversations: { id: string; title: string; updatedAt: string }[];
+  conversations: { id: string; title: string; updatedAt: string; publicKey?: string }[];
   error: string | null;
+  isEncryptionEnabled: boolean;
+  isEncryptionInitialized: boolean;
   addMessage: (message: Omit<Message, 'id' | 'timestamp' | 'conversation_id'>, files?: File | File[]) => Promise<void>;
   fetchMessages: () => Promise<void>;
   deleteMessage: (id: string) => Promise<void>;
@@ -23,6 +55,8 @@ interface ChatState {
   clearError: () => void;
   stopGeneration: () => void;
   isGenerating: boolean;
+  initializeEncryption: () => Promise<void>;
+  toggleEncryption: (enabled: boolean) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -32,6 +66,104 @@ export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   error: null,
   isGenerating: false,
+  isEncryptionEnabled: false,
+  isEncryptionInitialized: false,
+  
+  // Initialize encryption for the current user
+  initializeEncryption: async () => {
+    try {
+      // Check if encryption is already initialized in local storage
+      if (hasEncryptionKeys()) {
+        // Keys already exist locally
+        set({ 
+          isEncryptionInitialized: true,
+          isEncryptionEnabled: true,
+          error: null
+        });
+        logInfo(LogCategory.ENCRYPTION, "Encryption initialized from local keys", null);
+        return;
+      }
+      
+      // Check if user is authenticated
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) {
+        console.error('Auth error during encryption initialization:', userError);
+        logError(LogCategory.ENCRYPTION, "Auth error during encryption initialization", null, null, { error: userError.message });
+        
+        // Generate keys anyway for local use
+        initializeEncryption();
+        set({ 
+          isEncryptionInitialized: true,
+          isEncryptionEnabled: true,
+          error: null
+        });
+        logInfo(LogCategory.ENCRYPTION, "Fallback to local encryption due to auth error", null);
+        return;
+      }
+      
+      if (!userData.user) {
+        console.warn('User not authenticated, using local encryption only');
+        logWarning(LogCategory.ENCRYPTION, "User not authenticated, using local encryption only", null);
+        
+        // Generate keys anyway for local use
+        initializeEncryption();
+        set({ 
+          isEncryptionInitialized: true,
+          isEncryptionEnabled: true,
+          error: null
+        });
+        return;
+      }
+      
+      // Setup encryption for the user - this now returns keys even if DB operations fail
+      const keys = await setupUserEncryption(userData.user.id);
+      
+      if (keys && keys.publicKey && keys.privateKey) {
+        set({ 
+          isEncryptionInitialized: true,
+          isEncryptionEnabled: true,
+          error: null
+        });
+        logInfo(LogCategory.ENCRYPTION, "User encryption successfully initialized", userData.user.id);
+      } else {
+        // If setupUserEncryption failed to return valid keys, fallback to local only
+        const localKeys = initializeEncryption();
+        set({ 
+          isEncryptionInitialized: true,
+          isEncryptionEnabled: true,
+          error: null
+        });
+        logWarning(LogCategory.ENCRYPTION, "Fallback to local encryption due to key setup failure", userData.user.id);
+      }
+    } catch (error: any) {
+      console.error('Error initializing encryption:', error);
+      logError(LogCategory.ENCRYPTION, "Failed to initialize encryption", null, null, { error: error.message });
+      
+      // On error, still try to initialize local encryption
+      try {
+        initializeEncryption();
+        set({ 
+          isEncryptionInitialized: true,
+          isEncryptionEnabled: true,
+          error: null
+        });
+        logInfo(LogCategory.ENCRYPTION, "Fallback to local encryption after error", null);
+      } catch (localError: any) {
+        set({ 
+          error: `Failed to initialize encryption: ${error.message}`,
+          isEncryptionInitialized: false,
+          isEncryptionEnabled: false
+        });
+        logError(LogCategory.ENCRYPTION, "Failed even local encryption initialization", null, null, { error: localError.message });
+      }
+    }
+  },
+  
+  // Toggle encryption on/off
+  toggleEncryption: (enabled: boolean) => {
+    set({ isEncryptionEnabled: enabled });
+    logInfo(LogCategory.ENCRYPTION, `Encryption ${enabled ? 'enabled' : 'disabled'}`, null);
+  },
   
   clearError: () => set({ error: null }),
   
@@ -39,6 +171,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // Implement stop signal for streaming
     window.stopGenerationSignal = true;
     set({ isGenerating: false });
+    logInfo(LogCategory.CHAT, "User stopped message generation", null, get().currentConversationId);
   },
   
   startNewConversation: () => {
@@ -48,18 +181,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
       messages: [],
       error: null
     });
+    logInfo(LogCategory.CHAT, "Started new conversation", null, newConversationId);
     return newConversationId;
   },
   
   addMessage: async (message, files) => {
     const tempId = 'temp-' + uuidv4();
-    const tempMessage = {
+    const tempMessage = createMessage({
       id: tempId,
       role: message.role,
       content: message.content,
       timestamp: new Date().toISOString(),
       conversation_id: get().currentConversationId || 'new',
-    } as Message;
+      isEncrypted: false
+    });
 
     // Normalize files to array
     const filesArray = files ? (Array.isArray(files) ? files : [files]) : [];
@@ -76,10 +211,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // Ensure the file type is supported before uploading
         const isImage = file.type.startsWith('image/');
         const isDocument = file.type === 'application/pdf' || 
-                           file.type === 'text/plain' ||
-                           file.type === 'text/csv' ||
-                           file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-                           file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+                          file.type === 'text/plain' ||
+                          file.type === 'text/csv' ||
+                          file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+                          file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
         
         // If file has no type, try to infer from extension
         const extension = fileName.split('.').pop()?.toLowerCase();
@@ -87,6 +222,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         
         if (!isImage && !isDocument && !hasValidExtension) {
           set({ error: 'Unsupported file type. Please upload text documents, PDFs, or images.' });
+          logError(LogCategory.FILE, "Unsupported file type", null, get().currentConversationId, { fileType: file.type, fileName });
           return;
         }
         
@@ -96,6 +232,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
         if (uploadError) {
           console.error('File upload error:', uploadError);
+          logError(LogCategory.FILE, "File upload error", null, get().currentConversationId, { error: uploadError.message, fileName });
           throw uploadError;
         }
 
@@ -109,14 +246,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
           url: urlData.publicUrl,
           size: file.size
         };
+        
+        logInfo(LogCategory.FILE, "File uploaded successfully", null, get().currentConversationId, { 
+          fileName, 
+          fileType: file.type, 
+          fileSize: file.size 
+        });
       } catch (error: any) {
         console.error('Error uploading file:', error);
         set({ error: `Failed to upload file: ${error.message}. Please try again.` });
+        logError(LogCategory.FILE, "Failed to upload file", null, get().currentConversationId, { error: error.message });
         return;
       }
     } else if (file) {
       console.error('Invalid file object:', file);
       set({ error: 'Invalid file format. Please try again with a different file.' });
+      logError(LogCategory.FILE, "Invalid file format", null, get().currentConversationId);
       return;
     }
     
@@ -130,11 +275,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError) {
         console.error('Auth error:', userError);
+        logError(LogCategory.AUTH, "Auth error when adding message", null, get().currentConversationId, { error: userError.message });
         throw userError;
       }
       
       const userId = userData.user?.id;
       if (!userId) {
+        logError(LogCategory.AUTH, "User is not authenticated", null, get().currentConversationId);
         throw new Error('User is not authenticated');
       }
       
@@ -147,233 +294,293 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const { data: convData, error: convCheckError } = await supabase
             .from('conversations')
             .select('id')
-            .eq('id', conversationId)
-            .single();
-            
-          if (convCheckError) {
-            if (convCheckError.code !== 'PGRST116') {
-              console.error('Conversation check error:', convCheckError);
-            }
-            // If the conversation doesn't exist, we'll create a new one below
-            conversationExists = false;
-          } else {
-            conversationExists = !!convData;
-          }
-        } catch (error: any) {
+            .eq('id', conversationId);
+          
+          conversationExists = convData ? convData.length > 0 : false;
+        } catch (error) {
           console.error('Error checking conversation:', error);
-          // Continue with creating a new conversation
-          conversationExists = false;
         }
       }
       
-      if (!conversationId || !conversationExists) {
-        conversationId = conversationId || uuidv4();
+      // If this is a new conversation, create it
+      if (!conversationExists || !conversationId) {
+        if (!conversationId) {
+          conversationId = uuidv4();
+        }
+
+        // Check if encryption is enabled and initialized
+        const isEncryptionEnabled = get().isEncryptionEnabled && get().isEncryptionInitialized;
+        let publicKey = null;
+
+        if (isEncryptionEnabled) {
+          // Get user's public key for the conversation
+          publicKey = await getUserPublicKey(userId);
+        }
+        
+        // Create conversation with only required fields
+        const basicConversation = {
+          id: conversationId,
+          user_id: userId,
+          title: message.content.substring(0, 30) + (message.content.length > 30 ? '...' : '')
+        };
         
         try {
-          const { data: newConvData, error: convError } = await supabase
+          // Insert without timestamp columns to avoid schema issues
+          const { error: createConvError } = await supabase
             .from('conversations')
-            .insert([
-              {
-                id: conversationId,
-                user_id: userId,
-                title: message.content.substring(0, 50) + (message.content.length > 50 ? '...' : '')
-              }
-            ])
-            .select();
-  
-          if (convError) {
-            console.error('Error creating conversation:', convError);
-            throw convError;
-          }
-          
-          set({ currentConversationId: conversationId });
-          
-          // Update conversations list with the new conversation
-          const { data: createdConv } = await supabase
-            .from('conversations')
-            .select('id, title, updated_at')
-            .eq('id', conversationId)
-            .single();
+            .insert(basicConversation);
             
-          if (createdConv) {
-            set(state => ({
-              conversations: [
-                {
-                  id: createdConv.id,
-                  title: createdConv.title,
-                  updatedAt: createdConv.updated_at
-                },
-                ...state.conversations
-              ]
-            }));
+          if (createConvError) {
+            console.error('Error creating conversation:', createConvError);
+            throw createConvError;
           }
-        } catch (error: any) {
-          console.error('Error in conversation creation:', error);
-          // Continue with message insertion anyway
+        } catch (error) {
+          console.error('Failed to create conversation:', error);
+          throw error;
+        }
+        
+        set({ currentConversationId: conversationId });
+      }
+      
+      // Handle message encryption if enabled
+      let dbMessage: any = {
+        id: uuidv4(),
+        user_id: userId,
+        role: message.role,
+        content: message.content,
+        conversation_id: conversationId,
+      };
+      
+      // Add timestamp using the 'timestamp' field (from our migration) instead of created_at
+      dbMessage.timestamp = new Date().toISOString();
+      
+      // If there's an attachment, add it
+      if (tempMessage.attachment) {
+        dbMessage.attachment = tempMessage.attachment;
+      }
+      
+      // Encrypt the message if encryption is enabled
+      const isEncryptionEnabled = get().isEncryptionEnabled && get().isEncryptionInitialized;
+      if (isEncryptionEnabled && hasEncryptionKeys()) {
+        try {
+          // Encrypt the content
+          const { encryptedData, nonce } = encryptForStorage(message.content);
+          
+          // Update the message with encrypted data
+          dbMessage = {
+            ...dbMessage,
+            is_encrypted: true,
+            encrypted_content: encryptedData,
+            nonce: nonce,
+            // Keep the original content for now, we'll remove it when we get response
+            content: '[Encrypted Message]'
+          };
+        } catch (encryptError: any) {
+          console.error('Error encrypting message:', encryptError);
+          set({ error: `Failed to encrypt message: ${encryptError.message}` });
+          // Continue with unencrypted message if encryption fails
         }
       }
       
       // Insert the user message
-      try {
-        const { data: messageData, error: messageError } = await supabase
-          .from('messages')
-          .insert([
-            {
-              role: message.role,
-              content: message.content,
-              user_id: userId,
-              conversation_id: conversationId,
-              ...(tempMessage.attachment ? { attachment: tempMessage.attachment } : {})
-            }
-          ])
-          .select();
-          
-        if (messageError) {
-          console.error('Error inserting message:', messageError);
-          throw messageError;
-        }
-
-        if (!messageData || messageData.length === 0) {
-          throw new Error('Failed to save message');
-        }
-
-        set((state) => ({
-          messages: state.messages.map(msg => 
-            msg.id === tempId ? messageData[0] as Message : msg
-          ),
-        }));
-
-        // Declare tempAssistantId outside the try block to make it accessible in the catch block
-        const tempAssistantId = 'temp-' + uuidv4();
+      const { error: insertError } = await supabase
+        .from('messages')
+        .insert(dbMessage);
+      
+      if (insertError) {
+        console.error('Error inserting message:', insertError);
+        throw insertError;
+      }
+      
+      // Update conversations list
+      get().fetchConversations();
+      
+      // Only call the AI if this is a user message
+      if (message.role === 'user') {
+        set({ isGenerating: true });
         
+        // Call the LMStudio API or your AI service
         try {
-          // Create a temporary assistant message that we'll update with the stream
-          const tempAssistantMessage: Message = {
-            id: tempAssistantId,
+          // Send all previous messages in the conversation for context
+          // but remove temporary messages first
+          const convoMessages: LLMMessage[] = get().messages
+            .filter(m => !m.id.startsWith('temp-'))
+            .map(m => ({
+              role: m.role,
+              content: m.content,
+              attachment: m.attachment
+            }));
+            
+          // Add the new user message
+          convoMessages.push({
+            role: message.role,
+            content: message.content,
+            attachment: tempMessage.attachment
+          });
+          
+          // Generate AI response
+          const assistantMessageId = uuidv4();
+          
+          // Add a temporary assistant message
+          const assistantMessage = createMessage({
+            id: assistantMessageId,
             role: 'assistant',
             content: '',
             timestamp: new Date().toISOString(),
-            conversation_id: conversationId
-          };
-
-          set((state) => ({
-            messages: [...state.messages, tempAssistantMessage],
-            isGenerating: true,
+            conversation_id: conversationId || 'new',
+            isEncrypted: false
+          });
+          
+          set(state => ({
+            messages: [
+              ...state.messages.filter(m => m.id !== tempId),
+              {
+                ...tempMessage,
+                id: dbMessage.id, // Replace the temp id with the real one
+              },
+              assistantMessage
+            ],
           }));
-
-          let fullResponse = '';
           
-          // Make sure files are valid Blobs before passing them
-          const validFiles = filesArray.filter(file => file instanceof Blob);
+          // Start streaming response
+          let fullAssistantResponse = '';
           
-          const stream = getChatCompletionStream([
-            ...get().messages.filter(m => m.id !== tempId && m.id !== tempAssistantId),
-            messageData[0] as Message
-          ], validFiles.length > 0 ? validFiles : undefined);
-
-          for await (const chunk of stream) {
-            // Check if generation should be stopped
-            if (window.stopGenerationSignal) {
-              break;
-            }
-            
-            fullResponse += chunk;
-            set((state) => ({
-              messages: state.messages.map(msg =>
-                msg.id === tempAssistantId
-                  ? { ...msg, content: fullResponse }
-                  : msg
-              ),
-            }));
-          }
-          
-          // Save the complete response to the database
           try {
-            const { data: aiData, error: aiError } = await supabase
-              .from('messages')
-              .insert([
-                {
-                  role: 'assistant',
-                  content: fullResponse,
+            const completionStream = getChatCompletionStream(convoMessages, {
+              onResponse: (chunk: string) => {
+                fullAssistantResponse += chunk;
+                
+                set(state => ({
+                  messages: state.messages.map(msg => 
+                    msg.id === assistantMessageId 
+                      ? { ...msg, content: fullAssistantResponse }
+                      : msg
+                  )
+                }));
+              },
+              onFinish: async () => {
+                // Prepare the assistant message for database
+                let finalAssistantMessage: any = {
+                  id: assistantMessageId,
                   user_id: userId,
-                  conversation_id: conversationId
-                },
-              ])
-              .select();
-
-            if (aiError) {
-              console.error('Error saving AI response:', aiError);
-              throw aiError;
-            }
-
-            if (aiData && aiData.length > 0) {
-              set((state) => ({
-                messages: state.messages.map(msg =>
-                  msg.id === tempAssistantId ? aiData[0] as Message : msg
-                ),
-                loading: false,
-                isGenerating: false,
-              }));
-              
-              const messagesCount = get().messages.length;
-              if (messagesCount <= 2) {
-                try {
-                  const title = message.content.substring(0, 50) + (message.content.length > 50 ? '...' : '');
-                  await get().updateConversationTitle(conversationId, title);
-                } catch (titleError) {
-                  console.error('Error updating conversation title:', titleError);
-                  // Don't fail the whole operation if title update fails
+                  role: 'assistant',
+                  content: fullAssistantResponse,
+                  conversation_id: conversationId,
+                  timestamp: new Date().toISOString()
+                };
+                
+                // Encrypt assistant message if encryption is enabled
+                if (isEncryptionEnabled && hasEncryptionKeys()) {
+                  try {
+                    const { encryptedData, nonce } = encryptForStorage(fullAssistantResponse);
+                    
+                    finalAssistantMessage = {
+                      ...finalAssistantMessage,
+                      is_encrypted: true,
+                      encrypted_content: encryptedData,
+                      nonce: nonce,
+                      // Store both for compatibility
+                      content: '[Encrypted Message]'
+                    };
+                  } catch (encryptError: any) {
+                    console.error('Error encrypting assistant message:', encryptError);
+                    // Continue with unencrypted message
+                  }
+                }
+                
+                // Insert the assistant message into the database
+                const { error: assistantInsertError } = await supabase
+                  .from('messages')
+                  .insert(finalAssistantMessage);
+                
+                if (assistantInsertError) {
+                  console.error('Error inserting assistant message:', assistantInsertError);
+                  throw assistantInsertError;
                 }
               }
-            } else {
-              console.error('No AI response data returned');
-              throw new Error('Failed to save AI response');
+            });
+            
+            // Consume the generator to make it run
+            for await (const chunk of completionStream) {
+              // The onResponse callback will handle the update
             }
           } catch (aiError: any) {
-            console.error('Error getting AI response:', aiError);
-            // Keep the user message but show error for the AI response
-            set((state) => ({
-              messages: state.messages.filter(msg => msg.id !== tempAssistantId),
-              loading: false,
-              isGenerating: false,
-              error: aiError.message || 'Failed to get AI response. Please try again.'
-            }));
+            console.error('AI error:', aiError);
+            set({ 
+              error: `Error generating response: ${aiError.message}`,
+              isGenerating: false
+            });
           }
-        } catch (error: any) {
-          console.error('Error in addMessage:', error);
-          set((state) => ({
-            messages: state.messages.filter(msg => msg.id !== tempId),
-            loading: false,
-            isGenerating: false,
-            error: error.message || 'Failed to send message. Please try again.'
-          }));
+        } catch (aiError: any) {
+          console.error('AI error:', aiError);
+          set({ 
+            error: `Error generating response: ${aiError.message}`,
+            isGenerating: false
+          });
         }
-      } catch (error: any) {
-        console.error('Error in addMessage:', error);
-        set((state) => ({
-          messages: state.messages.filter(msg => msg.id !== tempId),
-          loading: false,
-          isGenerating: false,
-          error: error.message || 'Failed to send message. Please try again.'
-        }));
       }
+      
+      // Update messages list with real IDs
+      await get().fetchMessages();
+      
+      // After successful message processing
+      logInfo(
+        LogCategory.CHAT,
+        `Added ${message.role} message`,
+        userId,
+        conversationId,
+        {
+          messageId: dbMessage.id,
+          isEncrypted: isEncryptionEnabled && hasEncryptionKeys(),
+          hasAttachment: !!tempMessage.attachment
+        }
+      );
+      
     } catch (error: any) {
       console.error('Error in addMessage:', error);
-      set((state) => ({
-        messages: state.messages.filter(msg => msg.id !== tempId),
+      set({ 
         loading: false,
-        isGenerating: false,
-        error: error.message || 'Failed to send message. Please try again.'
+        error: `Failed to add message: ${error.message}`
+      });
+      
+      // Log the error
+      logError(
+        LogCategory.CHAT,
+        "Failed to add message",
+        null,
+        get().currentConversationId,
+        { error: error.message }
+      );
+      
+      // Remove the temporary message
+      set(state => ({
+        messages: state.messages.filter(m => m.id !== tempId)
       }));
     }
   },
   
+  // Fetch messages with decryption support
   fetchMessages: async () => {
+    const conversationId = get().currentConversationId;
+    if (!conversationId) {
+      set({ messages: [] });
+      return;
+    }
+    
+    set({ loading: true, error: null });
+    
     try {
-      const conversationId = get().currentConversationId;
-      if (!conversationId) {
-        set({ messages: [], error: null });
-        return;
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) {
+        console.error('Auth error:', userError);
+        logError(LogCategory.AUTH, "Auth error when fetching messages", null, conversationId, { error: userError.message });
+        throw userError;
+      }
+      
+      const userId = userData.user?.id;
+      if (!userId) {
+        logError(LogCategory.AUTH, "User not authenticated when fetching messages", null, conversationId);
+        throw new Error('User is not authenticated');
       }
       
       const { data, error } = await supabase
@@ -381,323 +588,402 @@ export const useChatStore = create<ChatState>((set, get) => ({
         .select('*')
         .eq('conversation_id', conversationId)
         .order('timestamp', { ascending: true });
-
-      if (error) throw error;
-      if (data) {
-        set({ messages: data as Message[], error: null });
+      
+      if (error) {
+        console.error('Error fetching messages:', error);
+        logError(LogCategory.CHAT, "Error fetching messages", userId, conversationId, { error: error.message });
+        throw error;
+      }
+      
+      const isEncryptionEnabled = get().isEncryptionEnabled && get().isEncryptionInitialized;
+      
+      if (data && data.length > 0) {
+        const processedMessages = data.map(msg => {
+          // Handle encrypted messages
+          if (msg.is_encrypted && isEncryptionEnabled && hasEncryptionKeys()) {
+            try {
+              // Attempt to decrypt if we have the keys
+              if (msg.encrypted_content && msg.nonce) {
+                const decryptedContent = decryptFromStorage(msg.encrypted_content, msg.nonce);
+                msg.content = decryptedContent;
+              }
+            } catch (decryptError) {
+              console.error('Failed to decrypt message:', decryptError);
+              logError(
+                LogCategory.ENCRYPTION, 
+                "Failed to decrypt message", 
+                userId, 
+                conversationId, 
+                { messageId: msg.id, error: (decryptError as Error).message }
+              );
+              // Keep the placeholder if decryption fails
+              msg.content = '[Encrypted Message - Unable to Decrypt]';
+            }
+          }
+          
+          return createMessage(msg);
+        });
+        
+        set({ messages: processedMessages, loading: false });
+        logInfo(LogCategory.CHAT, "Successfully fetched messages", userId, conversationId, { messageCount: data.length });
+      } else {
+        set({ messages: [], loading: false });
+        logInfo(LogCategory.CHAT, "No messages found for conversation", userId, conversationId);
       }
     } catch (error: any) {
-      console.error('Error fetching messages:', error);
-      set({ error: error.message || 'Failed to load messages' });
+      console.error('Error in fetchMessages:', error);
+      set({ 
+        loading: false, 
+        error: `Failed to fetch messages: ${error.message}`,
+        messages: []
+      });
+      logError(LogCategory.CHAT, "Failed to fetch messages", null, conversationId, { error: error.message });
     }
   },
   
   fetchConversations: async () => {
     try {
-      const user = await supabase.auth.getUser();
-      const userId = user.data.user?.id;
-      
-      if (!userId) {
-        set({ conversations: [], error: 'User not authenticated' });
-        return;
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) {
+        console.error('Auth error:', userError);
+        logError(LogCategory.AUTH, "Auth error when fetching conversations", null, null, { error: userError.message });
+        throw userError;
       }
       
-      // Simplified query to avoid column selection syntax errors
+      const userId = userData.user?.id;
+      if (!userId) {
+        logError(LogCategory.AUTH, "User not authenticated when fetching conversations", null);
+        throw new Error('User is not authenticated');
+      }
+      
       const { data, error } = await supabase
         .from('conversations')
-        .select('id, title, updated_at, user_id')
+        .select('*')
         .eq('user_id', userId)
         .order('updated_at', { ascending: false });
-
+      
       if (error) {
-        console.error('Supabase query error:', error);
-        // Don't throw, just log and handle gracefully
-        set({ 
-          error: `Failed to load conversations: ${error.message}`,
-          // Keep existing conversations to prevent UI disruption
-        });
+        console.error('Error fetching conversations:', error);
+        logError(LogCategory.CHAT, "Failed to fetch conversations", userId, null, { error: error.message });
+        throw error;
+      }
+      
+      if (data) {
+        // Format the conversations for the UI
+        const formattedConversations = data.map(conv => ({
+          id: conv.id,
+          title: conv.title || 'Untitled Conversation',
+          updatedAt: conv.updated_at || conv.created_at || new Date().toISOString(),
+          publicKey: conv.public_key
+        }));
+        
+        set({ conversations: formattedConversations });
+        logInfo(LogCategory.CHAT, "Successfully fetched conversations", userId, null, { conversationCount: data.length });
+      }
+    } catch (error: any) {
+      console.error('Error in fetchConversations:', error);
+      set({ error: `Failed to load conversations: ${error.message}` });
+      logError(LogCategory.CHAT, "Failed to fetch conversations", null, null, { error: error.message });
+    }
+  },
+  
+  setCurrentConversation: async (conversationId: string) => {
+    set({ 
+      currentConversationId: conversationId,
+      messages: [],
+      loading: true,
+      error: null
+    });
+    
+    try {
+      // Get user information for logging
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData?.user?.id;
+      
+      // Fetch messages for the conversation
+      await get().fetchMessages();
+      
+      logInfo(LogCategory.CHAT, "Set current conversation", userId, conversationId);
+    } catch (error: any) {
+      console.error('Error in setCurrentConversation:', error);
+      set({
+        loading: false,
+        error: `Failed to load conversation: ${error.message}`
+      });
+      logError(LogCategory.CHAT, "Failed to set current conversation", null, conversationId, { error: error.message });
+    }
+  },
+  
+  deleteConversation: async (conversationId: string) => {
+    set({ loading: true, error: null });
+    
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) {
+        console.error('Auth error:', userError);
+        logError(LogCategory.AUTH, "Auth error when deleting conversation", null, conversationId, { error: userError.message });
+        throw userError;
+      }
+      
+      const userId = userData.user?.id;
+      if (!userId) {
+        logError(LogCategory.AUTH, "User not authenticated when deleting conversation", null, conversationId);
+        throw new Error('User is not authenticated');
+      }
+      
+      // Delete all messages in the conversation first
+      const { error: messagesError } = await supabase
+        .from('messages')
+        .delete()
+        .eq('conversation_id', conversationId);
+      
+      if (messagesError) {
+        console.error('Error deleting conversation messages:', messagesError);
+        logError(
+          LogCategory.CHAT, 
+          "Failed to delete conversation messages", 
+          userId, 
+          conversationId, 
+          { error: messagesError.message }
+        );
+        throw messagesError;
+      }
+      
+      // Then delete the conversation
+      const { error: conversationError } = await supabase
+        .from('conversations')
+        .delete()
+        .eq('id', conversationId);
+      
+      if (conversationError) {
+        console.error('Error deleting conversation:', conversationError);
+        logError(
+          LogCategory.CHAT, 
+          "Failed to delete conversation record", 
+          userId, 
+          conversationId, 
+          { error: conversationError.message }
+        );
+        throw conversationError;
+      }
+      
+      // Update local state
+      set(state => ({
+        conversations: state.conversations.filter(c => c.id !== conversationId),
+        currentConversationId: state.currentConversationId === conversationId ? null : state.currentConversationId,
+        messages: state.currentConversationId === conversationId ? [] : state.messages,
+        loading: false
+      }));
+      
+      logInfo(LogCategory.CHAT, "Conversation deleted successfully", userId, conversationId);
+    } catch (error: any) {
+      console.error('Error in deleteConversation:', error);
+      set({
+        loading: false,
+        error: `Failed to delete conversation: ${error.message}`
+      });
+      logError(LogCategory.CHAT, "Failed to delete conversation", null, conversationId, { error: error.message });
+    }
+  },
+  
+  updateConversationTitle: async (conversationId: string, title: string) => {
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) {
+        console.error('Auth error:', userError);
+        logError(LogCategory.AUTH, "Auth error when updating conversation title", null, conversationId, { error: userError.message });
+        throw userError;
+      }
+      
+      const userId = userData.user?.id;
+      if (!userId) {
+        logError(LogCategory.AUTH, "User not authenticated when updating conversation title", null, conversationId);
+        throw new Error('User is not authenticated');
+      }
+      
+      // Validate title
+      const trimmedTitle = title.trim();
+      if (!trimmedTitle) {
+        set({ error: 'Conversation title cannot be empty' });
+        logWarning(LogCategory.CHAT, "Empty conversation title rejected", userId, conversationId);
         return;
       }
       
-      // Fix: Make sure we handle the case when data is null or empty array
-      const conversations = data || [];
-      console.log('Fetched conversations:', conversations); // Debug log
+      const { error } = await supabase
+        .from('conversations')
+        .update({ title: trimmedTitle })
+        .eq('id', conversationId);
       
-      set({ 
-        conversations: conversations.map(conv => ({
-          id: conv.id,
-          title: conv.title,
-          updatedAt: conv.updated_at
-        })),
-        error: null
-      });
-    } catch (error: any) {
-      console.error('Error fetching conversations:', error);
-      set({ 
-        error: error.message || 'Failed to load conversations',
-        // Don't clear conversations on error - keep existing state
-      });
-    }
-  },
-  
-  setCurrentConversation: async (conversationId) => {
-    try {
-      set({ currentConversationId: conversationId, error: null });
-      await get().fetchMessages();
-    } catch (error: any) {
-      set({ error: error.message || 'Failed to set conversation' });
-    }
-  },
-  
-  deleteMessage: async (id) => {
-    try {
-      const { error } = await supabase.from('messages').delete().eq('id', id);
-      if (error) throw error;
-      set((state) => ({
-        messages: state.messages.filter((msg) => msg.id !== id),
+      if (error) {
+        console.error('Error updating conversation title:', error);
+        set({ error: `Failed to update title: ${error.message}` });
+        logError(LogCategory.CHAT, "Failed to update conversation title", userId, conversationId, { error: error.message });
+        return;
+      }
+      
+      // Update local state
+      set(state => ({
+        conversations: state.conversations.map(c => 
+          c.id === conversationId ? { ...c, title: trimmedTitle } : c
+        ),
         error: null
       }));
+      
+      logInfo(LogCategory.CHAT, "Updated conversation title", userId, conversationId, { newTitle: trimmedTitle });
     } catch (error: any) {
-      console.error('Error deleting message:', error);
-      set({ error: error.message || 'Failed to delete message' });
+      console.error('Error in updateConversationTitle:', error);
+      set({ error: `Failed to update title: ${error.message}` });
+      logError(LogCategory.CHAT, "Failed to update conversation title", null, conversationId, { error: error.message });
+    }
+  },
+  
+  deleteMessage: async (id: string) => {
+    set({ loading: true, error: null });
+    
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) {
+        console.error('Auth error:', userError);
+        logError(LogCategory.AUTH, "Auth error when deleting message", null, get().currentConversationId, { error: userError.message });
+        throw userError;
+      }
+      
+      const userId = userData.user?.id;
+      if (!userId) {
+        logError(LogCategory.AUTH, "User not authenticated when deleting message", null, get().currentConversationId);
+        throw new Error('User is not authenticated');
+      }
+      
+      const { error } = await supabase
+        .from('messages')
+        .delete()
+        .eq('id', id);
+      
+      if (error) {
+        console.error('Error deleting message:', error);
+        logError(LogCategory.CHAT, "Failed to delete message", userId, get().currentConversationId, { messageId: id, error: error.message });
+        throw error;
+      }
+      
+      // Update local state
+      set(state => ({
+        messages: state.messages.filter(m => m.id !== id),
+        loading: false
+      }));
+      
+      logInfo(LogCategory.CHAT, "Message deleted successfully", userId, get().currentConversationId, { messageId: id });
+    } catch (error: any) {
+      console.error('Error in deleteMessage:', error);
+      set({
+        loading: false,
+        error: `Failed to delete message: ${error.message}`
+      });
+      logError(LogCategory.CHAT, "Failed to delete message", null, get().currentConversationId, { messageId: id, error: error.message });
     }
   },
   
   editMessage: async (id, newContent) => {
+    set({ loading: true });
+    
     try {
-      // First update UI optimistically
-      const messageToEdit = get().messages.find(m => m.id === id);
-      if (!messageToEdit) {
+      // Get the current message
+      const message = get().messages.find(m => m.id === id);
+      if (!message) {
         throw new Error('Message not found');
       }
       
-      // Save old message content for rollback if needed
-      const oldContent = messageToEdit.content;
-      
-      // Skip if content is the same
-      if (oldContent === newContent) {
-        return;
-      }
-      
-      // Update the UI immediately
-      set(state => ({
-        messages: state.messages.map(msg => 
-          msg.id === id ? { ...msg, content: newContent } : msg
-        ),
-        loading: true
-      }));
-      
-      // Update the message in the database
-      const { error: updateError } = await supabase
-        .from('messages')
-        .update({ content: newContent })
-        .eq('id', id);
-      
-      if (updateError) {
-        // Rollback the UI change if there's an error
-        set(state => ({
-          messages: state.messages.map(msg => 
-            msg.id === id ? { ...msg, content: oldContent } : msg
-          ),
-          loading: false,
-          error: `Failed to update message: ${updateError.message}`
-        }));
-        throw updateError;
-      }
-      
-      // Get all messages after the edited message to remove them
-      const messageIndex = get().messages.findIndex(m => m.id === id);
-      if (messageIndex === -1) return;
-      
-      // Remove all assistant messages that come after this edited message
-      const messagesToDelete = get().messages.slice(messageIndex + 1);
-      const assistantMessagesToDelete = messagesToDelete.filter(m => m.role === 'assistant');
-      
-      // Delete these messages from the database
-      for (const msg of assistantMessagesToDelete) {
-        if (!msg.id.startsWith('temp-')) {
-          await supabase
-            .from('messages')
-            .delete()
-            .eq('id', msg.id);
-        }
-      }
-      
-      // Remove the messages from the UI
-      set(state => ({
-        messages: state.messages.filter((_, index) => index <= messageIndex)
-      }));
-      
-      // Now get an updated response for the edited message
-      const userId = (await supabase.auth.getUser()).data.user?.id;
-      if (!userId) {
-        throw new Error('User is not authenticated');
-      }
-      
-      // Add a temporary message for the stream
-      const tempAssistantId = 'temp-' + uuidv4();
-      const tempAssistantMessage: Message = {
-        id: tempAssistantId,
-        role: 'assistant',
-        content: '',
-        timestamp: new Date().toISOString(),
-        conversation_id: get().currentConversationId as string
+      let updateData: any = {
+        content: newContent
       };
       
-      set(state => ({
-        messages: [...state.messages, tempAssistantMessage]
-      }));
-      
-      // Reset stop signal before starting generation
-      window.stopGenerationSignal = false;
-      
-      // Stream the new response
-      let fullResponse = '';
-      const stream = getChatCompletionStream(
-        get().messages.filter(m => m.id !== tempAssistantId)
-      );
-      
-      for await (const chunk of stream) {
-        // Check if generation should be stopped
-        if (window.stopGenerationSignal) {
-          break;
+      // Check if encryption is enabled
+      const isEncryptionEnabled = get().isEncryptionEnabled && get().isEncryptionInitialized;
+      if (isEncryptionEnabled && hasEncryptionKeys()) {
+        try {
+          const { encryptedData, nonce } = encryptForStorage(newContent);
+          
+          updateData = {
+            content: '[Encrypted Message]',
+            is_encrypted: true,
+            encrypted_content: encryptedData,
+            nonce: nonce
+          };
+        } catch (encryptError: any) {
+          console.error('Error encrypting edited message:', encryptError);
+          set({ error: `Failed to encrypt message: ${encryptError.message}` });
+          // Continue with unencrypted message
         }
-        
-        fullResponse += chunk;
-        set(state => ({
-          messages: state.messages.map(msg =>
-            msg.id === tempAssistantId
-              ? { ...msg, content: fullResponse }
-              : msg
-          )
-        }));
       }
       
-      // Save the new response to the database
-      const { data: aiData, error: aiError } = await supabase
+      const { error } = await supabase
         .from('messages')
-        .insert([
-          {
-            role: 'assistant',
-            content: fullResponse,
-            user_id: userId,
-            conversation_id: get().currentConversationId
-          }
-        ])
-        .select();
+        .update(updateData)
+        .eq('id', id);
       
-      if (aiError) {
-        throw aiError;
+      if (error) {
+        throw error;
       }
       
-      // Update the temporary message with the real one from the database
+      // Update the message in the local state
       set(state => ({
-        messages: state.messages.map(msg =>
-          msg.id === tempAssistantId
-            ? (aiData[0] as Message)
-            : msg
+        messages: state.messages.map(m => 
+          m.id === id ? { ...m, content: newContent } : m
         ),
-        loading: false,
-        isGenerating: false
+        loading: false
       }));
-      
     } catch (error: any) {
       console.error('Error editing message:', error);
-      set({
-        loading: false,
-        isGenerating: false,
-        error: `Failed to edit message: ${error.message}`
+      set({ 
+        error: `Failed to edit message: ${error.message}`,
+        loading: false
       });
     }
   },
   
   clearHistory: async () => {
+    set({ loading: true, error: null });
+    
     try {
-      const user = await supabase.auth.getUser();
-      const userId = user.data.user?.id;
-      
-      if (!userId) {
-        set({ error: 'User not authenticated' });
+      const conversationId = get().currentConversationId;
+      if (!conversationId) {
+        set({ loading: false });
+        logWarning(LogCategory.CHAT, "Attempted to clear history with no active conversation", null);
         return;
       }
       
-      // Delete all messages
-      const { error: msgError } = await supabase
-        .from('messages')
-        .delete()
-        .eq('user_id', userId);
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) {
+        console.error('Auth error:', userError);
+        logError(LogCategory.AUTH, "Auth error when clearing history", null, conversationId, { error: userError.message });
+        throw userError;
+      }
       
-      if (msgError) throw msgError;
+      const userId = userData.user?.id;
+      if (!userId) {
+        logError(LogCategory.AUTH, "User not authenticated when clearing history", null, conversationId);
+        throw new Error('User is not authenticated');
+      }
       
-      // Delete all conversations
-      const { error: convError } = await supabase
-        .from('conversations')
-        .delete()
-        .eq('user_id', userId);
-        
-      if (convError) throw convError;
-      
-      set({ 
-        messages: [],
-        conversations: [],
-        currentConversationId: null,
-        error: null
-      });
-    } catch (error: any) {
-      console.error('Error clearing history:', error);
-      set({ error: error.message || 'Failed to clear history' });
-    }
-  },
-  
-  deleteConversation: async (conversationId) => {
-    try {
-      // Delete messages in conversation
-      const { error: msgError } = await supabase
+      const { error } = await supabase
         .from('messages')
         .delete()
         .eq('conversation_id', conversationId);
-        
-      if (msgError) throw msgError;
       
-      // Delete conversation
-      const { error: convError } = await supabase
-        .from('conversations')
-        .delete()
-        .eq('id', conversationId);
-        
-      if (convError) throw convError;
+      if (error) {
+        console.error('Error clearing history:', error);
+        logError(LogCategory.CHAT, "Failed to clear history", userId, conversationId, { error: error.message });
+        throw error;
+      }
       
-      // Update state
-      set((state) => ({
-        conversations: state.conversations.filter((conv) => conv.id !== conversationId),
-        messages: state.currentConversationId === conversationId ? [] : state.messages,
-        currentConversationId: state.currentConversationId === conversationId ? null : state.currentConversationId,
-        error: null
-      }));
+      set({ messages: [], loading: false });
+      logInfo(LogCategory.CHAT, "Conversation history cleared", userId, conversationId);
     } catch (error: any) {
-      console.error('Error deleting conversation:', error);
-      set({ error: error.message || 'Failed to delete conversation' });
-    }
-  },
-  
-  updateConversationTitle: async (conversationId, title) => {
-    try {
-      const { error } = await supabase
-        .from('conversations')
-        .update({ title })
-        .eq('id', conversationId);
-        
-      if (error) throw error;
-      
-      set((state) => ({
-        conversations: state.conversations.map((conv) => 
-          conv.id === conversationId ? { ...conv, title } : conv
-        ),
-        error: null
-      }));
-    } catch (error: any) {
-      console.error('Error updating conversation title:', error);
-      set({ error: error.message || 'Failed to update conversation title' });
+      console.error('Error in clearHistory:', error);
+      set({
+        loading: false,
+        error: `Failed to clear history: ${error.message}`
+      });
+      logError(LogCategory.CHAT, "Failed to clear history", null, get().currentConversationId, { error: error.message });
     }
   }
 }));
