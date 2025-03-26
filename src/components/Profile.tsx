@@ -23,11 +23,19 @@ const Profile: React.FC<ProfileProps> = ({ user }) => {
       >
         <div className="w-8 h-8 rounded-full overflow-hidden bg-zinc-200 flex items-center justify-center">
           {user ? (
-            <img 
-              src={profile?.avatar_url || "https://img.icons8.com/?size=100&id=tZuAOUGm9AuS&format=png&color=000000"} 
-              alt={user?.email || ''} 
-              className="w-full h-full object-cover"
-            />
+            profile?.avatar_url ? (
+              <img 
+                src={profile.avatar_url} 
+                alt={profile?.first_name || user?.email || ''} 
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full bg-gradient-to-br from-rose-400 to-indigo-500 flex items-center justify-center">
+                <span className="text-xs font-bold text-white">
+                  {profile?.first_name ? profile.first_name.charAt(0).toUpperCase() : user?.email ? user.email.charAt(0).toUpperCase() : 'U'}
+                </span>
+              </div>
+            )
           ) : (
             <User className="h-4 w-4 text-zinc-500" />
           )}

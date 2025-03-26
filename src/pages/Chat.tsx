@@ -496,7 +496,7 @@ export const Chat: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <Profile user={user} />
                     <div className="text-sm font-medium truncate">
-                      {profile?.first_name ? `${profile.first_name} ${profile.last_name || ''}` : userEmail || 'User'}
+                      {profile?.first_name ? `${profile.first_name} ${profile.last_name || ''}` : user?.email?.split('@')[0] || 'User'}
                     </div>
                   </div>
                   <Button

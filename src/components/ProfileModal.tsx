@@ -14,7 +14,7 @@ interface ProfileModalProps {
   onClose: () => void;
 }
 
-const IMGBB_API_KEY = '09674dbc564537593072e410eb565c14';
+const IMGBB_API_KEY = '22160f47eda0fc1be9437cba5d879a58';
 const DEFAULT_AVATAR = "https://img.icons8.com/?size=100&id=tZuAOUGm9AuS&format=png&color=000000";
 
 const ProfileModal: React.FC<ProfileModalProps> = ({ user, isOpen, onClose }) => {
@@ -292,15 +292,23 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ user, isOpen, onClose }) =>
                         </div>
                       ) : (
                         <>
-                          <img 
-                            src={avatarUrl || DEFAULT_AVATAR} 
-                            alt={user?.email || ''} 
-                            className="w-full h-full object-cover"
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement;
-                              target.src = DEFAULT_AVATAR;
-                            }}
-                          />
+                          {avatarUrl ? (
+                            <img 
+                              src={avatarUrl} 
+                              alt={profile?.first_name || user?.email || ''} 
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                const target = e.target as HTMLImageElement;
+                                target.src = DEFAULT_AVATAR;
+                              }}
+                            />
+                          ) : (
+                            <div className="w-full h-full bg-gradient-to-br from-rose-400 to-indigo-500 flex items-center justify-center">
+                              <span className="text-lg font-bold text-white">
+                                {profile?.first_name ? profile.first_name.charAt(0).toUpperCase() : user?.email ? user.email.charAt(0).toUpperCase() : 'U'}
+                              </span>
+                            </div>
+                          )}
                           {isEditing && (
                             <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                               <div className="text-white text-xs font-medium flex flex-col items-center">

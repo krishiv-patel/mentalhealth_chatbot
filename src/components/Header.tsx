@@ -140,12 +140,12 @@ export const Header: React.FC = () => {
                   {profile?.avatar_url ? (
                     <img 
                       src={profile.avatar_url} 
-                      alt={profile.username || 'User'} 
+                      alt={profile?.first_name || 'User'} 
                       className="w-full h-full object-cover"
                     />
                   ) : (
                     <span className="text-xs font-medium text-white">
-                      {user.email ? user.email.charAt(0).toUpperCase() : 'U'}
+                      {profile?.first_name ? profile.first_name.charAt(0).toUpperCase() : user.email ? user.email.charAt(0).toUpperCase() : 'U'}
                     </span>
                   )}
                 </motion.button>
@@ -162,7 +162,7 @@ export const Header: React.FC = () => {
                     >
                       <div className="p-2">
                         <div className="px-4 py-2 text-xs text-muted-foreground">
-                          {user.email}
+                          {profile?.first_name ? `${profile.first_name} ${profile.last_name || ''}` : user.email}
                         </div>
                         <Link to="/chat" className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-muted/50 transition-colors">
                           <MessageSquare className="h-4 w-4" />
