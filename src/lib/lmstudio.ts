@@ -149,6 +149,17 @@ export interface CompletionOptions {
 }
 
 /**
+ * Helper function to build request body for LM Studio
+ */
+function buildRequestBody(processedMessages: LLMMessage[]) {
+  return {
+    model: 'gemma-3-12b-it',
+    messages: [...processedMessages],
+    stream: true,
+  };
+}
+
+/**
  * Get a non-streaming chat completion from LM Studio
  */
 export async function getChatCompletion(messages: LLMMessage[], files?: File | File[]) {
@@ -257,12 +268,7 @@ export async function getChatCompletion(messages: LLMMessage[], files?: File | F
     }
     
     // Create system message with context about files/images
-    const systemMessage = {
-      role: 'system' as const,
-      content: `You are a helpful AI assistant that can analyze documents and images for users. ${
-        fileContent ? 'Please analyze the content provided including any images or documents and provide detailed insights about what you see or the information contained in them.' : ''
-      }`
-    };
+
     
     // Add diagnostic logging
     console.log(`System message generated. Has file content: ${!!fileContent}`);
@@ -273,14 +279,7 @@ export async function getChatCompletion(messages: LLMMessage[], files?: File | F
     console.log('Sending request to LM Studio (non-streaming)');
     
     // Send request to LM Studio
-    const requestBody = {
-      model: 'gemma-3-12b-it-gguf',
-      messages: [
-        systemMessage,
-        ...processedMessages
-      ],
-      stream: true,
-    };
+    const requestBody = buildRequestBody(processedMessages);
 
     // Log request for debugging
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
@@ -427,12 +426,6 @@ export async function* getChatCompletionStream(messages: LLMMessage[], options?:
     }
     
     // Create system message with context about files/images
-    const systemMessage = {
-      role: 'system' as const,
-      content: `You are a helpful AI assistant that can analyze documents and images for users. ${
-        fileContent ? 'Please analyze the content provided including any images or documents and provide detailed insights about what you see or the information contained in them.' : ''
-      }`
-    };
     
     // Add diagnostic logging
     console.log(`System message generated for streaming. Has file content: ${!!fileContent}`);
@@ -443,16 +436,7 @@ export async function* getChatCompletionStream(messages: LLMMessage[], options?:
     console.log('Sending request to LM Studio (streaming)');
     
     // Send request to LM Studio
-    const requestBody = {
-      model: 'gemma-3-12b-it-gguf',
-      messages: [
-        systemMessage,
-        ...processedMessages
-      ],
-      temperature: 0.7,
-      max_tokens: -1,
-      stream: true,
-    };
+    const requestBody = buildRequestBody(processedMessages);
 
     // Log request for debugging
     console.log('Streaming request body:', JSON.stringify(requestBody, null, 2));
@@ -490,7 +474,15 @@ export async function* getChatCompletionStream(messages: LLMMessage[], options?:
       buffer = lines.pop() || '';
 
       for (const line of lines) {
-        if (line.trim() === '' || line.trim() === 'data: [DONE]') continue;
+        if (line.trim() === '') continue;
+        
+        // Check for the [DONE] message which indicates the stream is complete
+        if (line.trim() === 'data: [DONE]') {
+          if (completionOptions?.onFinish) {
+            await completionOptions.onFinish();
+          }
+          continue;
+        }
 
         try {
           const data = JSON.parse(line.replace(/^data: /, ''));
@@ -510,22 +502,29 @@ export async function* getChatCompletionStream(messages: LLMMessage[], options?:
 
     // Process any remaining buffer content
     if (buffer) {
-      try {
-        const data = JSON.parse(buffer.replace(/^data: /, ''));
-        const content = data.choices[0]?.delta?.content || '';
-        
-        if (content) {
-          if (completionOptions?.onResponse) {
-            completionOptions.onResponse(content);
-          }
-          yield content;
+      // Check if the buffer contains the DONE message
+      if (buffer.trim() === 'data: [DONE]') {
+        if (completionOptions?.onFinish) {
+          await completionOptions.onFinish();
         }
-      } catch (e) {
-        console.warn('Failed to parse remaining buffer:', buffer);
+      } else {
+        try {
+          const data = JSON.parse(buffer.replace(/^data: /, ''));
+          const content = data.choices[0]?.delta?.content || '';
+          
+          if (content) {
+            if (completionOptions?.onResponse) {
+              completionOptions.onResponse(content);
+            }
+            yield content;
+          }
+        } catch (e) {
+          console.warn('Failed to parse remaining buffer:', buffer);
+        }
       }
     }
     
-    // Call onFinish callback if provided
+    // Call onFinish callback if not already called by the [DONE] message handler
     if (completionOptions?.onFinish) {
       await completionOptions.onFinish();
     }

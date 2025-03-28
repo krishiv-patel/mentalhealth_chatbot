@@ -399,6 +399,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (message.role === 'user') {
         set({ isGenerating: true });
         
+        // Safety timeout to ensure isGenerating is reset after 2 minutes
+        // even if something goes wrong with the normal completion process
+        const safetyTimeout = setTimeout(() => {
+          set({ isGenerating: false });
+          console.warn('Safety timeout triggered to reset isGenerating state');
+        }, 120000); // 2 minutes
+        
         // Call the LMStudio API or your AI service
         try {
           // Send all previous messages in the conversation for context
@@ -497,6 +504,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   console.error('Error inserting assistant message:', assistantInsertError);
                   throw assistantInsertError;
                 }
+
+                // Set isGenerating to false after completion
+                set({ isGenerating: false });
+                clearTimeout(safetyTimeout);
               }
             });
             
@@ -510,6 +521,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               error: `Error generating response: ${aiError.message}`,
               isGenerating: false
             });
+            clearTimeout(safetyTimeout);
           }
         } catch (aiError: any) {
           console.error('AI error:', aiError);
@@ -517,6 +529,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             error: `Error generating response: ${aiError.message}`,
             isGenerating: false
           });
+          clearTimeout(safetyTimeout);
         }
       }
       
