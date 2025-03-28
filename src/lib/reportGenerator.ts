@@ -193,6 +193,9 @@ export function generateHTML(report: ChatReport): string {
         --text-color: #1e293b;
         --text-muted: #64748b;
         --border-color: #e2e8f0;
+        --code-bg: #f1f5f9;
+        --blockquote-bg: #f8fafc;
+        --blockquote-border: #e2e8f0;
       }
       
       /* Enable dark mode support */
@@ -206,6 +209,9 @@ export function generateHTML(report: ChatReport): string {
           --text-color: #f1f5f9;
           --text-muted: #94a3b8;
           --border-color: #334155;
+          --code-bg: #1e293b;
+          --blockquote-bg: #1e1e1e;
+          --blockquote-border: #334155;
         }
       }
       
@@ -243,11 +249,11 @@ export function generateHTML(report: ChatReport): string {
         position: relative;
         background: linear-gradient(to right, var(--primary-color), var(--secondary-color));
         color: white;
-        border-radius: 12px;
-        padding: 2rem;
-        margin-bottom: 2rem;
+        border-radius: 16px;
+        padding: 2.5rem;
+        margin-bottom: 2.5rem;
         overflow: hidden;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
       }
       
       .header::before {
@@ -262,143 +268,254 @@ export function generateHTML(report: ChatReport): string {
       }
       
       .header h1 {
-        font-size: 2.5rem;
-        margin-bottom: 0.5rem;
-        font-weight: 700;
+        font-size: 2.75rem;
+        margin-bottom: 0.75rem;
+        font-weight: 800;
         position: relative;
         z-index: 1;
+        background: linear-gradient(to right, #ffffff, #e2e2e2);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-shadow: 0px 2px 4px rgba(0, 0, 0, 0.1);
       }
       
       .header p {
-        opacity: 0.9;
+        opacity: 0.95;
         position: relative;
         z-index: 1;
+        font-size: 1.1rem;
       }
       
       .stats-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
         gap: 1.5rem;
-        margin-bottom: 2rem;
+        margin-bottom: 2.5rem;
       }
       
       .stat-card {
         background-color: var(--card-color);
-        border-radius: 10px;
-        padding: 1.5rem;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        border-radius: 12px;
+        padding: 1.75rem;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
         border: 1px solid var(--border-color);
-        transition: transform 0.2s ease;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+      }
+      
+      .stat-card::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: linear-gradient(to right, var(--primary-color), var(--secondary-color));
+        opacity: 0;
+        transition: opacity 0.3s ease;
       }
       
       .stat-card:hover {
-        transform: translateY(-5px);
+        transform: translateY(-6px);
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+      }
+      
+      .stat-card:hover::after {
+        opacity: 1;
       }
       
       .stat-card h3 {
-        font-size: 0.9rem;
+        font-size: 1rem;
         color: var(--text-muted);
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.75rem;
         display: flex;
         align-items: center;
         gap: 0.5rem;
+        font-weight: 500;
       }
       
       .stat-card .value {
-        font-size: 2rem;
+        font-size: 2.5rem;
         font-weight: 700;
         color: var(--primary-color);
+        margin-bottom: 0.5rem;
       }
       
       .stat-card .details {
-        font-size: 0.9rem;
+        font-size: 0.95rem;
         color: var(--text-muted);
-        margin-top: 0.5rem;
       }
       
       .section {
         background-color: var(--card-color);
-        border-radius: 10px;
-        padding: 1.5rem;
-        margin-bottom: 2rem;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        border-radius: 12px;
+        padding: 2rem;
+        margin-bottom: 2.5rem;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
         border: 1px solid var(--border-color);
       }
       
       .section h2 {
-        font-size: 1.5rem;
-        margin-bottom: 1.5rem;
-        padding-bottom: 0.75rem;
+        font-size: 1.65rem;
+        margin-bottom: 1.75rem;
+        padding-bottom: 1rem;
         border-bottom: 1px solid var(--border-color);
-        font-weight: 600;
+        font-weight: 700;
+        position: relative;
+      }
+      
+      .section h2::after {
+        content: '';
+        position: absolute;
+        bottom: -1px;
+        left: 0;
+        width: 60px;
+        height: 3px;
+        background: linear-gradient(to right, var(--primary-color), var(--secondary-color));
+        border-radius: 3px;
       }
       
       .profile-section {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-        gap: 1rem;
+        gap: 1.5rem;
       }
       
       .profile-item {
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.75rem;
       }
       
       .profile-item label {
         display: block;
         font-size: 0.9rem;
         color: var(--text-muted);
-        margin-bottom: 0.25rem;
+        margin-bottom: 0.4rem;
+        font-weight: 500;
       }
       
       .profile-item span {
-        font-weight: 500;
+        font-weight: 600;
+        font-size: 1.05rem;
+      }
+      
+      .profile-header {
+        display: flex;
+        align-items: center;
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+      }
+      
+      .profile-avatar {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        background-color: var(--primary-color);
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 2rem;
+        font-weight: 600;
+        position: relative;
+        overflow: hidden;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        border: 3px solid white;
+      }
+      
+      .profile-avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      
+      .profile-details {
+        flex: 1;
+      }
+      
+      .profile-name {
+        font-size: 1.75rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+      }
+      
+      .profile-email {
+        color: var(--text-muted);
+        font-size: 1rem;
       }
       
       .chat-message {
         display: flex;
-        gap: 1rem;
-        margin-bottom: 1.5rem;
+        gap: 1.25rem;
+        margin-bottom: 2rem;
+        position: relative;
       }
       
       .avatar {
-        width: 40px;
-        height: 40px;
+        width: 50px;
+        height: 50px;
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
         font-weight: 600;
-        font-size: 0.85rem;
+        font-size: 1.1rem;
         flex-shrink: 0;
+        position: relative;
+        overflow: hidden;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+      }
+      
+      .avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
       }
       
       .user-avatar {
         background-color: rgba(79, 70, 229, 0.1);
         color: var(--primary-color);
+        border: 2px solid rgba(79, 70, 229, 0.2);
       }
       
       .assistant-avatar {
         background-color: rgba(139, 92, 246, 0.1);
         color: var(--secondary-color);
+        border: 2px solid rgba(139, 92, 246, 0.2);
       }
       
       .message-content {
         flex: 1;
+        position: relative;
       }
       
       .message-meta {
         display: flex;
         justify-content: space-between;
-        font-size: 0.85rem;
-        margin-bottom: 0.25rem;
+        font-size: 0.9rem;
+        margin-bottom: 0.5rem;
         color: var(--text-muted);
       }
       
+      .message-role {
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      
+      .message-time {
+        font-size: 0.85rem;
+      }
+      
       .message-bubble {
-        padding: 1rem;
-        border-radius: 0.75rem;
-        line-height: 1.6;
+        padding: 1.5rem;
+        border-radius: 1rem;
+        line-height: 1.7;
         white-space: pre-wrap;
+        position: relative;
+        overflow: hidden;
       }
       
       .user-bubble {
@@ -412,7 +529,7 @@ export function generateHTML(report: ChatReport): string {
       }
       
       .attachment {
-        margin-top: 0.75rem;
+        margin-top: 1rem;
         padding: 0.75rem;
         background-color: var(--background-color);
         border-radius: 0.5rem;
@@ -420,29 +537,177 @@ export function generateHTML(report: ChatReport): string {
         display: flex;
         align-items: center;
         gap: 0.5rem;
+        border: 1px solid var(--border-color);
       }
       
       .attachment-icon {
         color: var(--text-muted);
       }
       
+      .attachment-image {
+        margin-top: 1rem;
+        max-width: 100%;
+        border-radius: 0.5rem;
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+      }
+      
+      .attachment-image img {
+        max-width: 100%;
+        max-height: 300px;
+        display: block;
+      }
+      
+      .attachment-caption {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        text-align: center;
+        padding: 0.5rem;
+        background-color: var(--card-color);
+        border-top: 1px solid var(--border-color);
+      }
+      
       .metadata-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-        gap: 1rem;
+        gap: 1.5rem;
       }
       
       .footer {
         text-align: center;
-        margin-top: 3rem;
-        padding: 1.5rem;
+        margin-top: 4rem;
+        padding: 2rem;
         color: var(--text-muted);
-        font-size: 0.9rem;
+        font-size: 1rem;
+        background-color: var(--card-color);
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        border: 1px solid var(--border-color);
       }
       
       .logo {
-        height: 30px;
+        height: 40px;
         margin-bottom: 1rem;
+      }
+      
+      /* Markdown Styling */
+      .markdown h1, .markdown h2, .markdown h3, .markdown h4, .markdown h5, .markdown h6 {
+        margin-top: 1.5rem;
+        margin-bottom: 1rem;
+        font-weight: 600;
+        line-height: 1.25;
+      }
+      
+      .markdown h1 {
+        font-size: 1.75rem;
+      }
+      
+      .markdown h2 {
+        font-size: 1.5rem;
+      }
+      
+      .markdown h3 {
+        font-size: 1.25rem;
+      }
+      
+      .markdown p {
+        margin-bottom: 1rem;
+      }
+      
+      .markdown ul, .markdown ol {
+        margin-bottom: 1rem;
+        padding-left: 2rem;
+      }
+      
+      .markdown li {
+        margin-bottom: 0.5rem;
+      }
+      
+      .markdown blockquote {
+        border-left: 4px solid var(--primary-color);
+        padding-left: 1rem;
+        margin-left: 0;
+        margin-bottom: 1rem;
+        color: var(--text-muted);
+        background-color: var(--blockquote-bg);
+        padding: 1rem;
+        border-radius: 0.25rem;
+      }
+      
+      .markdown code {
+        background-color: var(--code-bg);
+        padding: 0.2rem 0.4rem;
+        border-radius: 0.25rem;
+        font-family: monospace;
+        font-size: 0.9em;
+      }
+      
+      .markdown pre {
+        background-color: var(--code-bg);
+        padding: 1rem;
+        border-radius: 0.5rem;
+        overflow-x: auto;
+        margin-bottom: 1rem;
+        border: 1px solid var(--border-color);
+      }
+      
+      .markdown pre code {
+        background-color: transparent;
+        padding: 0;
+        border-radius: 0;
+        font-size: 0.9em;
+        color: inherit;
+      }
+      
+      .markdown a {
+        color: var(--primary-color);
+        text-decoration: none;
+      }
+      
+      .markdown a:hover {
+        text-decoration: underline;
+      }
+      
+      .markdown table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 1rem;
+      }
+      
+      .markdown th, .markdown td {
+        padding: 0.75rem;
+        border: 1px solid var(--border-color);
+      }
+      
+      .markdown th {
+        background-color: var(--background-color);
+        font-weight: 600;
+      }
+      
+      .markdown img {
+        max-width: 100%;
+        border-radius: 0.5rem;
+        margin: 1rem 0;
+      }
+      
+      .markdown hr {
+        border: none;
+        border-top: 1px solid var(--border-color);
+        margin: 2rem 0;
+      }
+      
+      /* Utility classes */
+      .text-primary {
+        color: var(--primary-color);
+      }
+      
+      .text-secondary {
+        color: var(--secondary-color);
+      }
+      
+      .text-accent {
+        color: var(--accent-color);
       }
       
       @media print {
@@ -476,8 +741,28 @@ export function generateHTML(report: ChatReport): string {
         .profile-section {
           grid-template-columns: 1fr;
         }
+        
+        .header h1 {
+          font-size: 2rem;
+        }
       }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/marked@4.0.0/marked.min.js"></script>
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        const messageBubbles = document.querySelectorAll('.message-bubble.markdown');
+        messageBubbles.forEach(function(bubble) {
+          const content = bubble.textContent;
+          if (content) {
+            try {
+              bubble.innerHTML = marked.parse(content);
+            } catch (e) {
+              console.error('Error parsing markdown:', e);
+            }
+          }
+        });
+      });
+    </script>
   </head>
   <body>
     <div class="container">
@@ -515,6 +800,20 @@ export function generateHTML(report: ChatReport): string {
       ${report.user ? `
       <div class="section">
         <h2>${t.userProfile}</h2>
+        <div class="profile-header">
+          <div class="profile-avatar">
+            ${report.user.avatarUrl ? 
+              `<img src="${report.user.avatarUrl}" alt="${report.user.username || 'User'}" />` : 
+              `${report.user.username?.charAt(0).toUpperCase() || report.user.email?.charAt(0).toUpperCase() || 'U'}`
+            }
+          </div>
+          <div class="profile-details">
+            <div class="profile-name">
+              ${report.user.fullName || report.user.username || 'User'}
+            </div>
+            ${report.user.email ? `<div class="profile-email">${report.user.email}</div>` : ''}
+          </div>
+        </div>
         <div class="profile-section">
           ${report.user.email ? `
           <div class="profile-item">
@@ -560,21 +859,34 @@ export function generateHTML(report: ChatReport): string {
           ${report.messages.map(message => `
           <div class="chat-message">
             <div class="avatar ${message.role === 'user' ? 'user-avatar' : 'assistant-avatar'}">
-              ${message.role === 'user' ? 'U' : 'A'}
+              ${message.role === 'user' ? 
+                (report.user && report.user.avatarUrl ? 
+                  `<img src="${report.user.avatarUrl}" alt="${report.user.username || 'User'}" />` : 
+                  'U') 
+                : 'A'
+              }
             </div>
             <div class="message-content">
               <div class="message-meta">
-                <span>${message.role === 'user' ? t.user : t.assistant}</span>
-                <span>${format(new Date(message.timestamp), 'h:mm:ss a')}</span>
+                <span class="message-role">${message.role === 'user' ? t.user : t.assistant}</span>
+                <span class="message-time">${format(new Date(message.timestamp), 'h:mm:ss a')}</span>
               </div>
-              <div class="message-bubble ${message.role === 'user' ? 'user-bubble' : 'assistant-bubble'}">
-                ${message.content.replace(/\n/g, '<br>')}
-                ${message.attachment ? `
-                <div class="attachment">
-                  <span class="attachment-icon">📎</span>
-                  ${message.attachment.name} (${formatFileSize(message.attachment.size)})
-                </div>
-                ` : ''}
+              <div class="message-bubble ${message.role === 'user' ? 'user-bubble' : 'assistant-bubble markdown'}">
+                ${message.content}
+                
+                ${message.attachment ? 
+                  message.attachment.type === 'image' || (message.attachment.name && message.attachment.name.match(/\.(jpeg|jpg|gif|png)$/i)) ?
+                  `<div class="attachment-image">
+                    <img src="${message.attachment.url}" alt="${message.attachment.name}" />
+                    <div class="attachment-caption">
+                      ${message.attachment.name} (${formatFileSize(message.attachment.size)})
+                    </div>
+                  </div>` :
+                  `<div class="attachment">
+                    <span class="attachment-icon">📎</span>
+                    ${message.attachment.name} (${formatFileSize(message.attachment.size)})
+                  </div>`
+                : ''}
               </div>
             </div>
           </div>
@@ -608,7 +920,7 @@ export function generateHTML(report: ChatReport): string {
       </div>
       
       <div class="footer">
-        <p>${t.generatedBy}</p>
+        <p>Generated by MindfulAI Chat</p>
       </div>
     </div>
   </body>

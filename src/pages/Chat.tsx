@@ -78,13 +78,14 @@ export const Chat: React.FC = () => {
   const [chatSummary, setChatSummary] = useState("");
   const [showSummary, setShowSummary] = useState(false);
   const [reportLanguageModalOpen, setReportLanguageModalOpen] = useState(false);
+  const [loadingSidebarConversation, setLoadingSidebarConversation] = useState<string | null>(null);
 
   // Define all handler functions before any useEffect hooks that use them
   const handleSend = async (content: string, file?: File) => {
     if (!content.trim() && !file) return;
     
     try {
-      await addMessage({ role: 'user', content }, file);
+      await addMessage({ role: 'user', content, isEncrypted: false }, file);
       setShowWelcomeMessage(false);
       setScrolledToBottom(true);
     } catch (error) {
@@ -373,8 +374,9 @@ export const Chat: React.FC = () => {
       
       // You could use your LLM to generate the summary
       const summaryMessage = {
-        role: 'user',
-        content: 'Summarize our conversation so far in a few bullet points. Keep your response concise.'
+        role: 'user' as const,
+        content: 'Summarize our conversation so far in a few bullet points. Keep your response concise.',
+        isEncrypted: false
       };
       
       // Add temporary summary message
@@ -410,6 +412,21 @@ export const Chat: React.FC = () => {
   const handleStopGeneration = () => {
     stopGeneration();
     showToastSuccess('Generation stopped', 'Response generation was interrupted');
+  };
+
+  const handleSidebarConversationClick = async (conversationId: string) => {
+    if (loadingSidebarConversation !== null) return; // Prevent clicks while loading
+    
+    try {
+      setLoadingSidebarConversation(conversationId);
+      await setCurrentConversation(conversationId);
+      setSidebarOpen(false);
+    } catch (error) {
+      console.error('Error changing conversation:', error);
+      showToastError('Failed to load conversation', 'Please try again');
+    } finally {
+      setLoadingSidebarConversation(null);
+    }
   };
 
   return (
@@ -463,13 +480,15 @@ export const Chat: React.FC = () => {
                           <Button
                             key={conversation.id}
                             variant={currentConversationId === conversation.id ? "secondary" : "ghost"}
-                            className="w-full justify-start text-left truncate py-2 h-auto"
-                            onClick={async () => {
-                              await setCurrentConversation(conversation.id);
-                              setSidebarOpen(false);
-                            }}
+                            className={`w-full justify-start text-left truncate py-2 h-auto ${loadingSidebarConversation === conversation.id ? 'opacity-70' : ''}`}
+                            onClick={() => handleSidebarConversationClick(conversation.id)}
+                            disabled={loadingSidebarConversation !== null}
                           >
-                            <MessageSquare className="h-4 w-4 mr-2 flex-shrink-0" />
+                            {loadingSidebarConversation === conversation.id ? (
+                              <Loader2 className="h-4 w-4 mr-2 flex-shrink-0 animate-spin" />
+                            ) : (
+                              <MessageSquare className="h-4 w-4 mr-2 flex-shrink-0" />
+                            )}
                             <span className="truncate">{conversation.title}</span>
                           </Button>
                         ))}

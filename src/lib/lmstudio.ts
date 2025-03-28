@@ -153,7 +153,7 @@ export interface CompletionOptions {
  */
 function buildRequestBody(processedMessages: LLMMessage[]) {
   return {
-    model: 'gemma-3-12b-it',
+    model: 'gemma-3-4b-it',
     messages: [...processedMessages],
     stream: true,
   };

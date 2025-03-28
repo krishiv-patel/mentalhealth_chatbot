@@ -18,6 +18,7 @@ export const History: React.FC = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
 
   useEffect(() => {
     const loadConversations = async () => {
@@ -38,11 +39,16 @@ export const History: React.FC = () => {
 
   const handleOpenConversation = async (conversationId: string) => {
     try {
+      setLoadingConversationId(conversationId);
+      setError(null);
+      
       await setCurrentConversation(conversationId);
       navigate('/chat');
     } catch (err) {
       console.error('Error opening conversation:', err);
       setError('Failed to open conversation. Please try again.');
+    } finally {
+      setLoadingConversationId(null);
     }
   };
 
@@ -108,40 +114,52 @@ export const History: React.FC = () => {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -20 }}
                     transition={{ duration: 0.2 }}
-                    className="bg-background rounded-xl p-4 shadow-sm hover:shadow-md transition-all hover:-translate-y-1 border border-border cursor-pointer"
-                    onClick={() => handleOpenConversation(conversation.id)}
+                    className={`bg-background rounded-xl p-4 shadow-sm hover:shadow-md transition-all hover:-translate-y-1 border border-border cursor-pointer ${loadingConversationId === conversation.id ? 'opacity-70' : ''}`}
+                    onClick={() => {
+                      if (loadingConversationId === null) {
+                        handleOpenConversation(conversation.id);
+                      }
+                    }}
                   >
                     <div className="flex justify-between items-start">
                       <div className="flex-1">
-                        <h3 className="font-medium text-lg text-foreground">{conversation.title}</h3>
+                        <h3 className="font-medium text-lg text-foreground">
+                          {conversation.title}
+                          {loadingConversationId === conversation.id && (
+                            <span className="ml-2 inline-flex items-center">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            </span>
+                          )}
+                        </h3>
                         <p className="text-sm text-muted">
                           {format(new Date(conversation.updatedAt), 'PPp')}
                         </p>
                       </div>
-                      <div className="flex space-x-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleEditTitle(conversation.id, conversation.title);
-                          }}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (confirm('Are you sure you want to delete this conversation?')) {
-                              deleteConversation(conversation.id);
-                            }
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
+                      
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEditTitle(conversation.id, conversation.title);
+                        }}
+                        disabled={loadingConversationId !== null}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm('Are you sure you want to delete this conversation?')) {
+                            deleteConversation(conversation.id);
+                          }
+                        }}
+                        disabled={loadingConversationId !== null}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
                     </div>
                   </motion.div>
                 ))}

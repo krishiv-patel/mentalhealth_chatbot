@@ -701,6 +701,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   
   setCurrentConversation: async (conversationId: string) => {
+    // First check if the conversation even exists in our list
+    const conversationExists = get().conversations.some(c => c.id === conversationId);
+    if (!conversationExists) {
+      console.error(`Conversation ${conversationId} not found in conversations list`);
+      logWarning(LogCategory.CHAT, "Attempted to load non-existent conversation", null, conversationId);
+      return;
+    }
+
+    // Set optimistic UI update
     set({ 
       currentConversationId: conversationId,
       messages: [],
@@ -977,19 +986,44 @@ export const useChatStore = create<ChatState>((set, get) => ({
         throw new Error('User is not authenticated');
       }
       
-      const { error } = await supabase
+      // Delete all messages in the conversation
+      const { error: messagesError } = await supabase
         .from('messages')
         .delete()
         .eq('conversation_id', conversationId);
       
-      if (error) {
-        console.error('Error clearing history:', error);
-        logError(LogCategory.CHAT, "Failed to clear history", userId, conversationId, { error: error.message });
-        throw error;
+      if (messagesError) {
+        console.error('Error clearing messages:', messagesError);
+        logError(LogCategory.CHAT, "Failed to clear messages", userId, conversationId, { error: messagesError.message });
+        throw messagesError;
+      }
+
+      // Delete the conversation from the conversations table
+      const { error: conversationError } = await supabase
+        .from('conversations')
+        .delete()
+        .eq('id', conversationId);
+      
+      if (conversationError) {
+        console.error('Error deleting conversation:', conversationError);
+        logError(LogCategory.CHAT, "Failed to delete conversation", userId, conversationId, { error: conversationError.message });
+        throw conversationError;
       }
       
-      set({ messages: [], loading: false });
-      logInfo(LogCategory.CHAT, "Conversation history cleared", userId, conversationId);
+      // Clear messages from state and reset currentConversationId
+      set({ 
+        messages: [], 
+        loading: false,
+        currentConversationId: null
+      });
+      
+      // Start a new conversation automatically
+      get().startNewConversation();
+      
+      // Refresh the conversations list to remove the deleted conversation
+      get().fetchConversations();
+      
+      logInfo(LogCategory.CHAT, "Conversation completely cleared and deleted", userId, conversationId);
     } catch (error: any) {
       console.error('Error in clearHistory:', error);
       set({
