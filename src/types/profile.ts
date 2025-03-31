@@ -8,4 +8,5 @@ export interface Profile {
   gender: string | null;
   date_of_birth: string | null;
   updated_at: string;
+  phone_number: string | null;
 } 

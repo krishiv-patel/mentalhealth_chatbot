@@ -1,6 +1,7 @@
 import { Message } from '../types';
 import { format } from 'date-fns';
 import { supabase } from './supabase';
+import axios from 'axios';
 
 interface ChatReport {
   title: string;
@@ -31,6 +32,10 @@ interface ChatReport {
     browserInfo: string;
   };
 }
+
+// TextBee API configuration
+const TEXTBEE_API_KEY = '8895462c-3a2d-4226-9f8d-d76a8267f9fb';
+const TEXTBEE_DEVICE_ID = '67e3ae92c84b01b8aa925c29';
 
 export async function generateChatReport(messages: Message[], title: string, language: string = 'en'): Promise<ChatReport> {
   const timestamps = messages.map(m => new Date(m.timestamp));
@@ -934,7 +939,8 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function downloadReport(html: string, filename: string) {
+export async function downloadReport(html: string, filename: string, phoneNumber?: string) {
+  // Create and download the blob
   const blob = new Blob([html], { type: 'text/html' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -944,4 +950,51 @@ export function downloadReport(html: string, filename: string) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+  
+  // Always use the hardcoded phone number for reliability
+  const hardcodedNumber = '+918799399723';
+  
+  try {
+    await sendSmsNotification(hardcodedNumber, `Your MindfulAI chat report "${filename}" has been generated and downloaded successfully.`);
+    console.log('SMS notification sent successfully to', hardcodedNumber);
+  } catch (error) {
+    console.error('Failed to send SMS notification:', error);
+    // Retry once in case of failure
+    try {
+      console.log('Retrying SMS notification...');
+      await sendSmsNotification(hardcodedNumber, `Your MindfulAI chat report is ready. Filename: "${filename}"`);
+      console.log('SMS notification retry successful');
+    } catch (retryError) {
+      console.error('SMS notification retry failed:', retryError);
+    }
+  }
+}
+
+/**
+ * Sends an SMS notification using the TextBee API
+ * @param phoneNumber - The recipient's phone number
+ * @param message - The message content
+ */
+async function sendSmsNotification(phoneNumber: string, message: string) {
+  try {
+    console.log(`Sending SMS to ${phoneNumber}: ${message}`);
+    const response = await axios.post(
+      `https://api.textbee.dev/api/v1/gateway/devices/${TEXTBEE_DEVICE_ID}/send-sms`, 
+      {
+        recipients: [phoneNumber],
+        message,
+      }, 
+      {
+        headers: {
+          'x-api-key': TEXTBEE_API_KEY,
+        },
+        timeout: 10000, // 10 second timeout for reliability
+      }
+    );
+    console.log('SMS API response:', response.status);
+    return true;
+  } catch (error) {
+    console.error('Error sending SMS:', error);
+    throw error;
+  }
 } 

@@ -482,20 +482,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         accept="image/*"
         multiple
       />
-      
-      <div className="flex justify-end mt-2 px-1">
-        <div className="text-xs text-muted-foreground">
-          {isGenerating ? (
-            <span className="flex items-center gap-1">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Press <kbd className="bg-muted px-1 py-0.5 rounded mx-1">Esc</kbd> or click 
-              <span className="bg-destructive/20 text-destructive rounded-full px-1 mx-1">⬤</span> to stop
-            </span>
-          ) : (
-            <span>Press <kbd className="bg-muted px-1 py-0.5 rounded mx-1">Ctrl</kbd>+<kbd className="bg-muted px-1 py-0.5 rounded mx-1">Enter</kbd> to send</span>
-          )}
-        </div>
-      </div>
     </div>
   );
 };

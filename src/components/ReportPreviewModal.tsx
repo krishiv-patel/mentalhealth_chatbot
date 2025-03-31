@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Download, FileText, Clock, MessageSquare, ClipboardCheck, ArrowRight, Share2 } from 'lucide-react';
+import { X, Download, FileText, Clock, MessageSquare, ClipboardCheck, ArrowRight, Share2, Phone } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from './ui/Button';
 
@@ -16,7 +16,8 @@ interface ReportPreviewModalProps {
   };
   isOpen: boolean;
   onClose: () => void;
-  onDownload: () => void;
+  onDownload: (phoneNumber?: string) => void;
+  userPhoneNumber?: string | null;
 }
 
 export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
@@ -26,11 +27,18 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
   isOpen,
   onClose,
   onDownload,
+  userPhoneNumber
 }) => {
   const [activeTab, setActiveTab] = useState<'preview' | 'details'>('preview');
   const [downloadHovered, setDownloadHovered] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState('+918799399723');
+  const [sendSms, setSendSms] = useState(true);
 
   if (!isOpen) return null;
+
+  const handleDownload = () => {
+    onDownload(phoneNumber);
+  };
 
   return (
     <AnimatePresence>
@@ -245,34 +253,49 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
               </div>
               
               {/* Footer */}
-              <div className="border-t p-4 flex justify-between items-center bg-card/50">
-                <Button 
-                  variant="outline" 
-                  onClick={onClose}
-                >
-                  Cancel
-                </Button>
-                <motion.div
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                >
+              <div className="border-t p-4 flex flex-col gap-4 bg-card/50">
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="sms-notification" 
+                    checked={sendSms}
+                    onChange={(e) => setSendSms(e.target.checked)}
+                    className="rounded text-primary focus:ring-primary"
+                  />
+                  <label htmlFor="sms-notification" className="text-sm">
+                    Send SMS notification to +918799399723
+                  </label>
+                </div>
+                
+                <div className="flex justify-between items-center">
                   <Button 
-                    onClick={onDownload}
-                    className="bg-gradient-to-r from-primary to-secondary hover:opacity-90 text-white min-w-[200px]"
-                    onMouseEnter={() => setDownloadHovered(true)}
-                    onMouseLeave={() => setDownloadHovered(false)}
+                    variant="outline" 
+                    onClick={onClose}
                   >
-                    <motion.div
-                      initial={{ x: 0 }}
-                      animate={{ x: downloadHovered ? 5 : 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="flex items-center gap-2"
-                    >
-                      <Download className="h-4 w-4" />
-                      <span>Download HTML Report</span>
-                    </motion.div>
+                    Cancel
                   </Button>
-                </motion.div>
+                  <motion.div
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                  >
+                    <Button 
+                      onClick={handleDownload}
+                      className="bg-gradient-to-r from-primary to-secondary hover:opacity-90 text-white min-w-[200px]"
+                      onMouseEnter={() => setDownloadHovered(true)}
+                      onMouseLeave={() => setDownloadHovered(false)}
+                    >
+                      <motion.div
+                        initial={{ x: 0 }}
+                        animate={{ x: downloadHovered ? 5 : 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="flex items-center gap-2"
+                      >
+                        <Download className="h-4 w-4" />
+                        <span>Download HTML Report</span>
+                      </motion.div>
+                    </Button>
+                  </motion.div>
+                </div>
               </div>
             </motion.div>
           </div>

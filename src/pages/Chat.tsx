@@ -154,13 +154,15 @@ export const Chat: React.FC = () => {
     }
   };
 
-  const downloadReportFile = () => {
+  const downloadReportFile = (phoneNumber?: string) => {
     if (!reportData) return;
     
     const html = generateHTML(reportData);
     // Include language in the filename if it's not English
     const langSuffix = reportData.metadata?.language !== 'en' ? `-${reportData.metadata.language}` : '';
-    downloadReport(html, `mindfulai-chat${langSuffix}-${format(new Date(), 'yyyy-MM-dd')}.html`);
+    const filename = `mindfulai-chat${langSuffix}-${format(new Date(), 'yyyy-MM-dd')}.html`;
+    
+    downloadReport(html, filename, phoneNumber);
   };
 
   const scrollToBottom = () => {
@@ -563,7 +565,7 @@ export const Chat: React.FC = () => {
                   >
                     <HeartPulse className="h-5 w-5 text-rose-500" />
                   </motion.div>
-                  <span className="gradient-text">MindfulAI Chat</span>
+                  <Link to="/" className="gradient-text">MindfulAI Chat</Link>
                 </h1>
               </div>
               <div className="flex items-center space-x-2">
@@ -967,14 +969,15 @@ export const Chat: React.FC = () => {
       </div>
 
       {/* Report Preview Modal */}
-      {reportData && (
+      {reportModalOpen && reportData && (
         <ReportPreviewModal
-          isOpen={reportModalOpen}
-          onClose={() => setReportModalOpen(false)}
-          onDownload={downloadReportFile}
           title={reportData.title}
           timestamp={reportData.timestamp}
           stats={reportData.stats}
+          isOpen={reportModalOpen}
+          onClose={() => setReportModalOpen(false)}
+          onDownload={downloadReportFile}
+          userPhoneNumber={profile?.phone_number}
         />
       )}
 
