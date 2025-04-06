@@ -1,7 +1,7 @@
 import { By, until } from 'selenium-webdriver';
-import { BaseTest } from './base/BaseTest';
+import { AuthenticatedTest } from './base/AuthenticatedTest';
 
-export class HistoryPageTest extends BaseTest {
+export class HistoryPageTest extends AuthenticatedTest {
     async run() {
         console.log('Testing history page...');
         
@@ -12,24 +12,42 @@ export class HistoryPageTest extends BaseTest {
         // Navigate to history page
         await this.driver.get(`${this.baseUrl}/history`);
         
-        // Wait for history content to load - try different selectors
+        // Wait for history content to load
         try {
-            await this.driver.wait(until.elementLocated(By.css('.history-content')), 5000);
-        } catch (error) {
-            console.log('History content not found with primary selector, trying alternatives...');
+            // Wait for the history page title
+            await this.driver.wait(until.elementLocated(By.xpath("//h2[contains(text(), 'Conversation History')]")), 5000);
+            console.log('History page title found');
             
-            // Try to find any history-related element
-            const historyElements = await this.driver.findElements(By.css('.history, [data-testid="history"], table, .list'));
-            if (historyElements.length === 0) {
-                console.log('No history elements found, taking screenshot for debugging');
-                await this.takeScreenshot('history-debug.png');
-                throw new Error('History page content not found');
-            }
+            // Wait for the history container
+            await this.driver.wait(until.elementLocated(By.css('.bg-card\\/50')), 5000);
+            console.log('History container found');
+        } catch (error) {
+            console.log('History page elements not found, taking screenshot for debugging');
+            await this.takeScreenshot('history-debug.png');
+            throw new Error('History page not found');
         }
         
         // Take screenshot of history page
         await this.takeScreenshot('history-page.png');
         
-        console.log('History page loaded successfully');
+        // Check for history items
+        const historyItems = await this.driver.findElements(By.css('.bg-background.rounded-xl'));
+        console.log(`Found ${historyItems.length} history items`);
+        
+        if (historyItems.length > 0) {
+            // Click on the first history item
+            await historyItems[0].click();
+            
+            // Wait for chat to load
+            try {
+                await this.driver.wait(until.elementLocated(By.css('textarea[placeholder="Type your message..."]')), 5000);
+                console.log('Successfully loaded chat from history');
+            } catch (error) {
+                console.log('Chat loading from history completed, but chat input not found');
+                await this.takeScreenshot('history-chat-debug.png');
+            }
+        } else {
+            console.log('No history items found, this might be expected if the user has no conversations');
+        }
     }
 } 
