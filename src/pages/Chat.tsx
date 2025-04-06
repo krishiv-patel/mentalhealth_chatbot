@@ -32,7 +32,8 @@ import {
   BookOpen,
   Sparkles,
   Wand2,
-  Languages
+  Languages,
+  Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
@@ -43,6 +44,7 @@ import { ReportPreviewModal } from '../components/ReportPreviewModal';
 import { useTheme } from '../components/ThemeProvider';
 import { MySwal, showConfirm, showSuccess, showError } from '../lib/sweet-alert';
 import { showSuccess as showToastSuccess, showError as showToastError } from '../lib/toast';
+import { analyzeImage, analyzeMultipleImages, analyzeVideo, analyzeYouTubeVideo } from '../lib/geminiVision';
 
 export const Chat: React.FC = () => {
   const { 
@@ -61,7 +63,9 @@ export const Chat: React.FC = () => {
     setCurrentConversation,
     editMessage,
     stopGeneration,
-    isGenerating
+    isGenerating,
+    apiMode,
+    setApiMode
   } = useChatStore();
   const { profile, fetchProfile } = useProfileStore();
   const { user } = useAuthStore();
@@ -356,7 +360,7 @@ export const Chat: React.FC = () => {
       }
       
       // Resend the last user message to get a new response
-      await addMessage({ role: 'user', content: lastUserMessage.content });
+      await addMessage({ role: 'user', content: lastUserMessage.content, isEncrypted: false });
       setScrolledToBottom(true);
     } catch (error) {
       console.error('Error regenerating response:', error);
@@ -428,6 +432,61 @@ export const Chat: React.FC = () => {
       showToastError('Failed to load conversation', 'Please try again');
     } finally {
       setLoadingSidebarConversation(null);
+    }
+  };
+
+  // Add new function to handle media analysis with Gemini Vision
+  const handleAnalyzeWithVision = async (prompt: string, files: File[]) => {
+    if (!files.length) return;
+    
+    try {
+      // Show loading state
+      setShowWelcomeMessage(false);
+      
+      // Determine if we're dealing with images or videos
+      const isVideo = files.some(file => file.type.startsWith('video/'));
+      
+      // First, add the user message with isEncrypted property to the backend
+      // This will also update the UI state through the chat store
+      await addMessage({ role: 'user', content: prompt, isEncrypted: false }, files);
+      
+      // Make sure we scroll to the bottom to show the user message and files
+      setScrolledToBottom(true);
+      
+      let response = '';
+      
+      // Process the media based on type
+      if (isVideo) {
+        // For videos, use the video analysis function
+        response = await analyzeVideo(files[0], prompt);
+      } else if (files.length === 1) {
+        // For a single image
+        response = await analyzeImage(files[0], prompt);
+      } else {
+        // For multiple images
+        response = await analyzeMultipleImages(files, prompt);
+      }
+      
+      // Add the assistant response with isEncrypted property
+      if (response) {
+        await addMessage({ role: 'assistant', content: response, isEncrypted: false });
+        setScrolledToBottom(true);
+      }
+      
+    } catch (error) {
+      console.error('Error analyzing media with Gemini Vision:', error);
+      showToastError('Failed to analyze media', 'Please try again');
+    }
+  };
+
+  // Update the handleSend function to match the expected signature
+  // This will fix the type mismatch with ChatInput's onSend prop
+  const handleSendWrapper = (content: string, files?: File[]) => {
+    if (files && files.length > 0) {
+      // If file is an array, use the first file for backward compatibility
+      handleSend(content, files[0]);
+    } else {
+      handleSend(content);
     }
   };
 
@@ -529,6 +588,22 @@ export const Chat: React.FC = () => {
                     {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
                   </Button>
                 </div>
+              </div>
+
+              {/* Add the API Mode Toggle Button */}
+              <div className="px-4 py-2 space-y-1">
+                <button
+                  onClick={() => setApiMode(apiMode === 'lmstudio' ? 'gemini' : 'lmstudio')}
+                  className="flex items-center space-x-2 w-full px-3 py-2 text-sm rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                  title={`Switch to ${apiMode === 'lmstudio' ? 'Gemini' : 'LMStudio'} API`}
+                >
+                  <Zap className={`h-4 w-4 ${apiMode === 'gemini' ? 'text-blue-500' : 'text-gray-500'}`} />
+                  <span>
+                    API Mode: <span className={`font-medium ${apiMode === 'gemini' ? 'text-blue-500' : ''}`}>
+                      {apiMode === 'lmstudio' ? 'Local LM Studio' : 'Google Gemini'}
+                    </span>
+                  </span>
+                </button>
               </div>
             </div>
           </motion.div>
@@ -958,10 +1033,12 @@ export const Chat: React.FC = () => {
           <div className="p-4 border-t bg-card/70 backdrop-blur-sm">
             <div className="max-w-3xl mx-auto">
               <ChatInput 
-                onSend={handleSend} 
-                disabled={loading} 
-                isGenerating={isGenerating}
+                onSend={handleSendWrapper}
                 onStopGeneration={handleStopGeneration}
+                onAnalyzeWithVision={handleAnalyzeWithVision}
+                disabled={loading || !currentConversationId}
+                isGenerating={isGenerating}
+                apiMode={apiMode}
               />
             </div>
           </div>

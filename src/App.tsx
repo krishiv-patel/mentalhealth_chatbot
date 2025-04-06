@@ -8,6 +8,7 @@ import { Resources } from './pages/Resources';
 import { TestUpload } from './pages/TestUpload';
 import { AdminLogs } from './pages/AdminLogs';
 import { UserLogs } from './pages/UserLogs';
+import { GeminiVisionTest } from './pages/GeminiVisionTest';
 import { useAuthStore } from './store/useAuthStore';
 import { useChatStore } from './store/useChatStore';
 import { supabase } from './lib/supabase';
@@ -120,6 +121,7 @@ function App() {
             <Route path="/resources" element={<Resources />} />
             <Route path="/login" element={<AuthForm />} />
             <Route path="/test-upload" element={<TestUpload />} />
+            <Route path="/vision-test" element={<GeminiVisionTest />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         ) : (
@@ -135,6 +137,7 @@ function App() {
               <Route path="/admin/logs" element={<AdminLogs />} />
               <Route path="/login" element={<Navigate to="/" replace />} />
               <Route path="/test-upload" element={<TestUpload />} />
+              <Route path="/vision-test" element={<GeminiVisionTest />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </>

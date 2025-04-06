@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import { getChatCompletionStream, LLMMessage, CompletionOptions } from '../lib/lmstudio';
+import { getChatCompletionStreamGemini } from '../lib/gemini';
 import type { Message, EncryptedData } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { 
@@ -42,6 +43,7 @@ interface ChatState {
   error: string | null;
   isEncryptionEnabled: boolean;
   isEncryptionInitialized: boolean;
+  apiMode: 'lmstudio' | 'gemini';
   addMessage: (message: Omit<Message, 'id' | 'timestamp' | 'conversation_id'>, files?: File | File[]) => Promise<void>;
   fetchMessages: () => Promise<void>;
   deleteMessage: (id: string) => Promise<void>;
@@ -57,6 +59,7 @@ interface ChatState {
   isGenerating: boolean;
   initializeEncryption: () => Promise<void>;
   toggleEncryption: (enabled: boolean) => void;
+  setApiMode: (mode: 'lmstudio' | 'gemini') => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -68,6 +71,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isGenerating: false,
   isEncryptionEnabled: false,
   isEncryptionInitialized: false,
+  apiMode: (typeof localStorage !== 'undefined' && localStorage.getItem('apiMode') as 'lmstudio' | 'gemini') || 'lmstudio',
   
   // Initialize encryption for the current user
   initializeEncryption: async () => {
@@ -226,8 +230,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return;
         }
         
+        // Check if bucket exists first to avoid cryptic errors
+        const { data: buckets, error: bucketsError } = await supabase.storage
+          .listBuckets();
+          
+        if (bucketsError) {
+          console.error('Error checking buckets:', bucketsError);
+          set({ error: `Storage error: ${bucketsError.message}. Please try again later.` });
+          logError(LogCategory.FILE, "Failed to check storage buckets", null, get().currentConversationId, { error: bucketsError.message });
+          return;
+        }
+        
+        // Check if attachments bucket exists
+        const attachmentsBucket = buckets?.find(bucket => bucket.name === 'mentalhealth');
+        
+        if (!attachmentsBucket) {
+          console.error('Mentalhealth bucket not found');
+          set({ error: 'Storage configuration error: mentalhealth bucket not found. Please contact support.' });
+          logError(LogCategory.FILE, "Mentalhealth bucket not found", null, get().currentConversationId);
+          return;
+        }
+        
         const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('attachments')
+          .from('mentalhealth')
           .upload(filePath, file);
 
         if (uploadError) {
@@ -237,7 +262,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
 
         const { data: urlData } = await supabase.storage
-          .from('attachments')
+          .from('mentalhealth')
           .getPublicUrl(filePath);
 
         tempMessage.attachment = {
@@ -406,66 +431,69 @@ export const useChatStore = create<ChatState>((set, get) => ({
           console.warn('Safety timeout triggered to reset isGenerating state');
         }, 120000); // 2 minutes
         
-        // Call the LMStudio API or your AI service
-        try {
-          // Send all previous messages in the conversation for context
-          // but remove temporary messages first
-          const convoMessages: LLMMessage[] = get().messages
-            .filter(m => !m.id.startsWith('temp-'))
-            .map(m => ({
-              role: m.role,
-              content: m.content,
-              attachment: m.attachment
-            }));
-            
-          // Add the new user message
-          convoMessages.push({
-            role: message.role,
-            content: message.content,
-            attachment: tempMessage.attachment
-          });
-          
-          // Generate AI response
-          const assistantMessageId = uuidv4();
-          
-          // Add a temporary assistant message
-          const assistantMessage = createMessage({
-            id: assistantMessageId,
-            role: 'assistant',
-            content: '',
-            timestamp: new Date().toISOString(),
-            conversation_id: conversationId || 'new',
-            isEncrypted: false
-          });
-          
-          set(state => ({
-            messages: [
-              ...state.messages.filter(m => m.id !== tempId),
-              {
-                ...tempMessage,
-                id: dbMessage.id, // Replace the temp id with the real one
-              },
-              assistantMessage
-            ],
-          }));
-          
-          // Start streaming response
-          let fullAssistantResponse = '';
-          
-          try {
-            const completionStream = getChatCompletionStream(convoMessages, {
-              onResponse: (chunk: string) => {
-                fullAssistantResponse += chunk;
-                
-                set(state => ({
-                  messages: state.messages.map(msg => 
-                    msg.id === assistantMessageId 
-                      ? { ...msg, content: fullAssistantResponse }
-                      : msg
-                  )
-                }));
-              },
-              onFinish: async () => {
+        // Send user message to the API
+        const allMessages = [...get().messages, dbMessage];
+        
+        // Convert to LLM format
+        const llmMessages = allMessages.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+          attachment: msg.attachment
+        }));
+        
+        // Generate streaming response based on the selected API mode
+        const apiMode = get().apiMode;
+        const generateCompletionStream = apiMode === 'lmstudio' 
+          ? getChatCompletionStream 
+          : getChatCompletionStreamGemini;
+        
+        logInfo(LogCategory.CHAT, `Using ${apiMode} API for response generation`, userId, conversationId);
+        
+        // Create a temporary assistant message
+        const assistantMessageId = uuidv4();
+        const assistantMessage = createMessage({
+          id: assistantMessageId,
+          role: 'assistant',
+          content: '',
+          timestamp: new Date().toISOString(),
+          conversation_id: conversationId,
+          isEncrypted: false
+        });
+        
+        // Add the temporary assistant message to the UI
+        set(state => ({
+          messages: [
+            ...state.messages,
+            assistantMessage
+          ],
+        }));
+        
+        let fullAssistantResponse = '';
+        
+        // Use the appropriate API to generate the response
+        await generateCompletionStream(
+          llmMessages,
+          {
+            onResponse: (chunk) => {
+              // Accumulate the response
+              fullAssistantResponse += chunk;
+              
+              // Update the temporary message with the content received so far
+              set(state => ({
+                messages: state.messages.map(msg => 
+                  msg.id === assistantMessageId 
+                    ? { ...msg, content: fullAssistantResponse }
+                    : msg
+                )
+              }));
+              
+              logInfo(LogCategory.CHAT, "Received response chunk", userId, conversationId, { 
+                chunkLength: chunk.length,
+                apiMode: apiMode
+              });
+            },
+            onFinish: async () => {
+              try {
                 // Prepare the assistant message for database
                 let finalAssistantMessage: any = {
                   id: assistantMessageId,
@@ -477,6 +505,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 };
                 
                 // Encrypt assistant message if encryption is enabled
+                const isEncryptionEnabled = get().isEncryptionEnabled && get().isEncryptionInitialized;
                 if (isEncryptionEnabled && hasEncryptionKeys()) {
                   try {
                     const { encryptedData, nonce } = encryptForStorage(fullAssistantResponse);
@@ -491,6 +520,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     };
                   } catch (encryptError: any) {
                     console.error('Error encrypting assistant message:', encryptError);
+                    logError(LogCategory.ENCRYPTION, "Error encrypting assistant message", userId, conversationId, {
+                      error: encryptError.message
+                    });
                     // Continue with unencrypted message
                   }
                 }
@@ -502,35 +534,57 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 
                 if (assistantInsertError) {
                   console.error('Error inserting assistant message:', assistantInsertError);
+                  logError(LogCategory.CHAT, "Error inserting assistant message", userId, conversationId, {
+                    error: assistantInsertError.message
+                  });
                   throw assistantInsertError;
                 }
-
+                
+                logInfo(LogCategory.CHAT, "Successfully saved assistant message", userId, conversationId, {
+                  messageId: assistantMessageId,
+                  length: fullAssistantResponse.length,
+                  apiMode: apiMode
+                });
+                
                 // Set isGenerating to false after completion
                 set({ isGenerating: false });
                 clearTimeout(safetyTimeout);
+              } catch (error: any) {
+                console.error('Error in onFinish callback:', error);
+                logError(LogCategory.CHAT, "Error in onFinish callback", userId, conversationId, {
+                  error: error.message,
+                  apiMode: apiMode
+                });
+                
+                set({ 
+                  error: `Error saving response: ${error.message}`,
+                  isGenerating: false
+                });
+                clearTimeout(safetyTimeout);
               }
-            });
-            
-            // Consume the generator to make it run
-            for await (const chunk of completionStream) {
-              // The onResponse callback will handle the update
+            },
+            onError: (error: Error) => {
+              console.error('AI response error:', error);
+              logError(LogCategory.CHAT, "AI response error", userId, conversationId, {
+                error: error.message,
+                apiMode: apiMode
+              });
+              
+              set({ 
+                error: `Error generating response: ${error.message}`,
+                isGenerating: false
+              });
+              clearTimeout(safetyTimeout);
+              
+              // Remove the temporary assistant message
+              set(state => ({
+                messages: state.messages.filter(m => m.id !== assistantMessageId)
+              }));
             }
-          } catch (aiError: any) {
-            console.error('AI error:', aiError);
-            set({ 
-              error: `Error generating response: ${aiError.message}`,
-              isGenerating: false
-            });
-            clearTimeout(safetyTimeout);
-          }
-        } catch (aiError: any) {
-          console.error('AI error:', aiError);
-          set({ 
-            error: `Error generating response: ${aiError.message}`,
-            isGenerating: false
-          });
-          clearTimeout(safetyTimeout);
-        }
+          },
+          // Pass the file(s) to the API if needed
+          (message.role === 'user' && files) ? files : undefined
+        );
       }
       
       // Update messages list with real IDs
@@ -1032,5 +1086,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
       logError(LogCategory.CHAT, "Failed to clear history", null, get().currentConversationId, { error: error.message });
     }
+  },
+  
+  // Set the API mode (LMStudio or Gemini)
+  setApiMode: (mode: 'lmstudio' | 'gemini') => {
+    set({ apiMode: mode });
+    localStorage.setItem('apiMode', mode);
+    
+    // If switching to Gemini mode and encryption is enabled, warn and disable encryption
+    if (mode === 'gemini' && get().isEncryptionEnabled) {
+      set({ 
+        isEncryptionEnabled: false,
+        error: 'Encryption has been automatically disabled for Gemini mode compatibility. Re-enable when switching back to LMStudio if needed.'
+      });
+      logWarning(LogCategory.ENCRYPTION, "Encryption auto-disabled when switching to Gemini API", null);
+    } else {
+      set({ error: null });
+    }
+    
+    logInfo(LogCategory.SYSTEM, `API mode set to ${mode}`, null);
   }
 }));

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Paperclip, X, Image, Loader2, FileText, Square, FileImage, Plus, Maximize, MinusCircle } from 'lucide-react';
+import { Send, Paperclip, X, Image, Loader2, FileText, Square, FileImage, Plus, Maximize, MinusCircle, Eye, HelpCircle } from 'lucide-react';
 import { Button } from './ui/Button';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
@@ -7,8 +7,10 @@ import { cn } from '../lib/utils';
 interface ChatInputProps {
   onSend: (message: string, files?: File[]) => void;
   onStopGeneration?: () => void;
+  onAnalyzeWithVision?: (message: string, files: File[]) => void;
   disabled?: boolean;
   isGenerating?: boolean;
+  apiMode?: 'lmstudio' | 'gemini';
 }
 
 interface FileWithPreview {
@@ -20,8 +22,10 @@ interface FileWithPreview {
 export const ChatInput: React.FC<ChatInputProps> = ({ 
   onSend, 
   onStopGeneration, 
+  onAnalyzeWithVision,
   disabled = false, 
-  isGenerating = false 
+  isGenerating = false,
+  apiMode = 'lmstudio'
 }) => {
   const [message, setMessage] = useState('');
   const [isFocused, setIsFocused] = useState(false);
@@ -35,6 +39,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [fileUploading, setFileUploading] = useState(false);
   const [fileUploadingName, setFileUploadingName] = useState('');
+  const [useVisionAnalysis, setUseVisionAnalysis] = useState(false);
 
   // Resize textarea as content grows
   useEffect(() => {
@@ -64,7 +69,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     }
     
     if (message.trim() || selectedFiles.length > 0) {
-      onSend(message, selectedFiles.map(f => f.file));
+      if (useVisionAnalysis && onAnalyzeWithVision && selectedFiles.length > 0) {
+        // Use Vision API for analysis
+        onAnalyzeWithVision(message, selectedFiles.map(f => f.file));
+      } else {
+        // Use regular chat
+        onSend(message, selectedFiles.map(f => f.file));
+      }
+      
       setMessage('');
       
       // Clean up preview URLs before clearing files
@@ -74,6 +86,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         }
       });
       setSelectedFiles([]);
+      setUseVisionAnalysis(false);
       
       // Reset textarea height
       if (textareaRef.current) {
@@ -195,6 +208,97 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   }, [isGenerating, message, selectedFiles, onStopGeneration, lightboxImage]);
 
   const hasImages = selectedFiles.some(f => f.file.type.startsWith('image/'));
+
+  const renderVisionToggle = () => {
+    const [showInfo, setShowInfo] = useState(false);
+    
+    if (!(apiMode === 'gemini' && selectedFiles.length > 0)) {
+      return null;
+    }
+    
+    return (
+      <div className="relative">
+        <button
+          type="button"
+          className={`flex items-center space-x-1 text-xs px-2 py-1 rounded ${useVisionAnalysis ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}
+          onClick={() => setUseVisionAnalysis(!useVisionAnalysis)}
+          title={useVisionAnalysis ? 'Using Gemini Vision to analyze media' : 'Click to use Gemini Vision for media analysis'}
+        >
+          <Eye className={`h-3.5 w-3.5 ${useVisionAnalysis ? 'text-green-600 dark:text-green-400' : ''}`} />
+          <span>{useVisionAnalysis ? 'Vision On' : 'Vision Off'}</span>
+        </button>
+        
+        <button
+          type="button"
+          className="ml-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+          onClick={() => setShowInfo(!showInfo)}
+        >
+          <HelpCircle className="h-3.5 w-3.5" />
+        </button>
+        
+        {showInfo && (
+          <div className="absolute bottom-full mb-2 left-0 w-64 p-2 bg-white dark:bg-gray-800 rounded shadow-lg text-xs z-10 dark:text-gray-200">
+            <p className="mb-1 font-medium">Gemini Vision Mode</p>
+            <p className="mb-1">When enabled, your media will be analyzed using Gemini's advanced vision capabilities.</p>
+            <p className="mb-1">Great for:</p>
+            <ul className="list-disc ml-4 mb-1">
+              <li>Describing images in detail</li>
+              <li>Analyzing video content</li>
+              <li>Detecting objects in images</li>
+              <li>Transcribing videos with visual context</li>
+            </ul>
+            <p>Only available with Gemini API mode.</p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderAttachmentOptions = () => {
+    return (
+      <div className="flex items-center space-x-2">
+        <button
+          type="button"
+          className={`text-gray-500 p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors ${showAttachmentOptions ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+          onClick={() => setShowAttachmentOptions(!showAttachmentOptions)}
+        >
+          <Paperclip className="h-5 w-5" />
+        </button>
+        
+        {renderVisionToggle()}
+      </div>
+    );
+  };
+
+  const renderSubmitButton = () => {
+    return (
+      <Button
+        type="submit"
+        disabled={disabled || (!message.trim() && selectedFiles.length === 0)}
+        variant="ghost"
+        size="sm"
+        className={cn(
+          "rounded-full",
+          isGenerating ? "bg-red-500 text-white hover:bg-red-600 hover:text-white" : "text-primary",
+          (!message.trim() && selectedFiles.length === 0) ? "opacity-50 cursor-not-allowed" : "",
+          sendHovered ? "bg-primary/10" : ""
+        )}
+        onMouseEnter={() => setSendHovered(true)}
+        onMouseLeave={() => setSendHovered(false)}
+      >
+        {isGenerating ? (
+          <Square className="h-5 w-5" />
+        ) : (
+          <div className="relative">
+            <Send className="h-5 w-5" />
+            {useVisionAnalysis && (
+              <div className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-green-500"></div>
+            )}
+          </div>
+        )}
+      </Button>
+    );
+  };
 
   return (
     <div className="relative">
@@ -383,59 +487,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         />
         
         <div className="absolute right-2 bottom-2 flex gap-1.5 items-center">
-          {!isGenerating && (
-            <Button 
-              onClick={() => setShowAttachmentOptions(prev => !prev)}
-              className="h-10 w-10 p-0 rounded-full hover:bg-card shadow-sm hover:shadow-md transition-all"
-              variant="ghost"
-              type="button"
-              disabled={disabled}
-            >
-              <Paperclip className="h-5 w-5 text-muted-foreground" />
-            </Button>
-          )}
+          {renderAttachmentOptions()}
           
-          <Button 
-            onClick={isGenerating ? onStopGeneration : handleSubmit}
-            className={cn(
-              "h-11 w-11 p-0 rounded-full shadow-sm hover:shadow-md transition-all",
-              isGenerating 
-                ? "bg-destructive hover:bg-destructive/90 text-destructive-foreground" 
-                : "bg-primary hover:bg-primary/90 text-primary-foreground"
-            )}
-            type="button"
-            disabled={isGenerating ? false : (disabled || (!message.trim() && selectedFiles.length === 0))}
-          >
-            <AnimatePresence mode="wait">
-              {isGenerating ? (
-                <motion.div
-                  key="stop"
-                  initial={{ scale: 0.8, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.8, opacity: 0 }}
-                  transition={{ duration: 0.15 }}
-                >
-                  <Square className="h-5 w-5" />
-                </motion.div>
-              ) : (
-                <motion.div
-                  key="send"
-                  initial={{ scale: 0.8, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.8, opacity: 0 }}
-                  transition={{ duration: 0.15 }}
-                  whileHover={{ 
-                    scale: 1.05, 
-                    rotate: 5,
-                    x: 2
-                  }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <Send className="h-5 w-5" />
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </Button>
+          {renderSubmitButton()}
         </div>
       </div>
       

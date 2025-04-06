@@ -15,7 +15,8 @@ import {
   Menu,
   X,
   History as HistoryIcon,
-  FileText
+  FileText,
+  Sparkles
 } from 'lucide-react';
 import { useTheme } from './ThemeProvider';
 import { useProfileStore } from '../store/useProfileStore';
@@ -94,6 +95,15 @@ export const Header: React.FC = () => {
               }`}
             >
               Resources
+            </Link>
+            <Link 
+              to="/vision-test" 
+              className={`text-sm font-medium hover:text-primary transition-colors flex items-center gap-1 ${
+                location.pathname === '/vision-test' ? 'text-primary' : 'text-muted-foreground'
+              }`}
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              Vision Test
             </Link>
             {user && (
               <Link 
@@ -256,6 +266,14 @@ export const Header: React.FC = () => {
             onClick={() => document.body.classList.remove('mobile-menu-open')}
           >
             Resources
+          </Link>
+          <Link 
+            to="/vision-test" 
+            className="text-lg font-medium w-full text-center py-3 hover:bg-muted rounded-lg transition-colors flex items-center justify-center gap-2"
+            onClick={() => document.body.classList.remove('mobile-menu-open')}
+          >
+            <Sparkles className="h-4 w-4" />
+            Vision Test
           </Link>
           {user && (
             <Link 
