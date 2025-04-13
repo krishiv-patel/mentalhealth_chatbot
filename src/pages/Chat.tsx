@@ -30,23 +30,36 @@ import {
   Square,
   RefreshCw,
   BookOpen,
-  Sparkles,
   Wand2,
   Languages,
-  Zap
+  Zap,
+  Share2,
+  Copy
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useParams } from 'react-router-dom';
 import { generateChatReport, generateHTML, downloadReport } from '../lib/reportGenerator';
 import { format } from 'date-fns';
 import { ReportPreviewModal } from '../components/ReportPreviewModal';
 import { useTheme } from '../components/ThemeProvider';
 import { MySwal, showConfirm, showSuccess, showError } from '../lib/sweet-alert';
 import { showSuccess as showToastSuccess, showError as showToastError } from '../lib/toast';
-import { analyzeImage, analyzeMultipleImages, analyzeVideo, analyzeYouTubeVideo } from '../lib/geminiVision';
+import { 
+  analyzeImage, 
+  analyzeMultipleImages, 
+  analyzeVideo, 
+  analyzeYouTubeVideo,
+  analyzeAudio,
+  transcribeAudio,
+  getAudioTimestampContent
+} from '../lib/geminiVision';
+import { ai } from '../lib/ai';
+import { GEMINI_MODEL } from '../lib/constants';
+import { logInfo, logError, LogCategory } from '../lib/logging';
 
 export const Chat: React.FC = () => {
+  const { id: conversationIdFromUrl } = useParams<{ id: string }>();
   const { 
     messages, 
     addMessage, 
@@ -79,10 +92,97 @@ export const Chat: React.FC = () => {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
-  const [chatSummary, setChatSummary] = useState("");
-  const [showSummary, setShowSummary] = useState(false);
   const [reportLanguageModalOpen, setReportLanguageModalOpen] = useState(false);
   const [loadingSidebarConversation, setLoadingSidebarConversation] = useState<string | null>(null);
+  const [shareToastVisible, setShareToastVisible] = useState(false);
+  const [initializationComplete, setInitializationComplete] = useState(false);
+  const [localLoading, setLocalLoading] = useState(true);
+
+  // Initialize chat - separate from the useEffect to prevent circular dependencies
+  const initializeChat = useCallback(async () => {
+    if (!user || initializationComplete) return;
+    
+    setLocalLoading(true);
+    try {
+      await fetchProfile();
+      
+      // Check if we have a conversation ID from the URL
+      if (conversationIdFromUrl) {
+        try {
+          // Try to set the current conversation from the URL parameter
+          await setCurrentConversation(conversationIdFromUrl);
+        } catch (error) {
+          console.error('Error loading conversation from URL:', error);
+          showToastError('Could not load the requested conversation', 'Starting a new chat instead');
+          const newConversationId = startNewConversation();
+          // Update URL with the new conversation
+          window.history.replaceState(null, '', `/chat/${newConversationId}`);
+        }
+      } else if (!currentConversationId) {
+        try {
+          const userData = await supabase.auth.getUser();
+          if (userData.data.user) {
+            // Safely set the email with nullish coalescing to handle undefined
+            setUserEmail(userData.data.user.email || null);
+            
+            // If we don't have a current conversation but we have conversation history,
+            // load the most recent conversation
+            if (conversations.length > 0) {
+              const conversationId = conversations[0].id;
+              await setCurrentConversation(conversationId);
+              // Update URL to include the conversation ID
+              window.history.replaceState(null, '', `/chat/${conversationId}`);
+            } else {
+              // Start a new conversation if there are no existing ones
+              const newConversationId = startNewConversation();
+              // Update URL to include the new conversation ID
+              window.history.replaceState(null, '', `/chat/${newConversationId}`);
+            }
+          }
+        } catch (error) {
+          console.error('Error initializing chat:', error);
+        }
+      } else {
+        // If we have a current conversation ID, fetch its messages
+        await fetchMessages();
+        
+        // Only update URL if it doesn't already contain the current conversation ID
+        const currentUrl = window.location.pathname;
+        if (!currentUrl.includes(currentConversationId)) {
+          // Update URL to include the current conversation ID
+          window.history.replaceState(null, '', `/chat/${currentConversationId}`);
+        }
+      }
+      
+      setInitializationComplete(true);
+    } catch (error) {
+      console.error('Error in chat initialization:', error);
+    } finally {
+      setLocalLoading(false);
+    }
+  }, [
+    user, 
+    conversationIdFromUrl, 
+    currentConversationId,
+    fetchProfile,
+    fetchMessages,
+    setCurrentConversation,
+    startNewConversation,
+    conversations,
+    initializationComplete
+  ]);
+
+  // Call initialization when component mounts
+  useEffect(() => {
+    initializeChat();
+  }, [initializeChat]);
+
+  // Update messages when currentConversationId changes
+  useEffect(() => {
+    if (currentConversationId && initializationComplete) {
+      fetchMessages();
+    }
+  }, [currentConversationId, fetchMessages, initializationComplete]);
 
   // Define all handler functions before any useEffect hooks that use them
   const handleSend = async (content: string, file?: File) => {
@@ -166,7 +266,7 @@ export const Chat: React.FC = () => {
     const langSuffix = reportData.metadata?.language !== 'en' ? `-${reportData.metadata.language}` : '';
     const filename = `mindfulai-chat${langSuffix}-${format(new Date(), 'yyyy-MM-dd')}.html`;
     
-    downloadReport(html, filename, phoneNumber);
+    downloadReport(html, filename, phoneNumber, userEmail || undefined);
   };
 
   const scrollToBottom = () => {
@@ -233,38 +333,6 @@ export const Chat: React.FC = () => {
       return () => container.removeEventListener('scroll', handleScroll);
     }
   }, [handleScroll]);
-
-  // Initialize chat
-  useEffect(() => {
-    const initChat = async () => {
-      await fetchProfile();
-      
-      // Fetch conversation history on component mount
-      await fetchConversations();
-      
-      if (!currentConversationId) {
-        const user = await supabase.auth.getUser();
-        if (user.data.user) {
-          // Safely set the email with nullish coalescing to handle undefined
-          setUserEmail(user.data.user.email || null);
-          
-          // If we don't have a current conversation but we have conversation history,
-          // load the most recent conversation
-          if (conversations.length > 0) {
-            await setCurrentConversation(conversations[0].id);
-          } else {
-            // Start a new conversation if there are no existing ones
-            startNewConversation();
-          }
-        }
-      } else {
-        // If we have a current conversation ID, fetch its messages
-        await fetchMessages();
-      }
-    };
-
-    initChat();
-  }, [fetchProfile, fetchMessages, startNewConversation, currentConversationId, fetchConversations, setCurrentConversation]);
 
   // Place this after all the function declarations (handleNewChat, prepareReport, handleClearHistory, etc.)
   // Keyboard shortcuts
@@ -335,7 +403,24 @@ export const Chat: React.FC = () => {
 
   const handleEditMessage = async (id: string, newContent: string) => {
     try {
-      await editMessage(id, newContent);
+      // Find the index of the message to edit
+      const editedMessageIndex = messages.findIndex(m => m.id === id);
+      if (editedMessageIndex >= 0) {
+        // Find any assistant messages that came after this message
+        const subsequentMessages = messages.slice(editedMessageIndex + 1);
+        
+        // Delete the original message and all subsequent messages
+        await deleteMessage(id);
+        
+        // Delete all subsequent messages
+        for (const msg of subsequentMessages) {
+          await deleteMessage(msg.id);
+        }
+        
+        // Add a new message with the edited content
+        await addMessage({ role: 'user', content: newContent, isEncrypted: false });
+        setScrolledToBottom(true);
+      }
     } catch (error) {
       console.error('Error editing message:', error);
       showToastError('Failed to edit message', 'Please try again');
@@ -368,53 +453,6 @@ export const Chat: React.FC = () => {
     }
   };
   
-  // Function to generate summary
-  const generateChatSummary = async () => {
-    if (messages.length < 4) {
-      showToastError('Not enough messages', 'Need more conversation history to generate a summary');
-      return;
-    }
-    
-    try {
-      setShowSummary(true);
-      
-      // You could use your LLM to generate the summary
-      const summaryMessage = {
-        role: 'user' as const,
-        content: 'Summarize our conversation so far in a few bullet points. Keep your response concise.',
-        isEncrypted: false
-      };
-      
-      // Add temporary summary message
-      const tempSummaryId = 'temp-summary';
-      setChatSummary("Generating summary...");
-      
-      // Actual summary generation code would go here
-      // For now, let's simulate it with a timeout
-      setTimeout(() => {
-        const contextMessages = messages.map(m => m.content).join("\n");
-        
-        // Simple mock summary for now
-        const topics = [
-          "Discussed anxiety management techniques",
-          "Explored sleep improvement strategies",
-          "Talked about mindfulness and meditation",
-          "Shared resources for further reading"
-        ];
-        
-        // Take a random selection of these based on message content
-        const selectedTopics = topics.filter(() => Math.random() > 0.3);
-        const summary = selectedTopics.map(t => `• ${t}`).join("\n");
-        
-        setChatSummary(summary);
-      }, 1500);
-    } catch (error) {
-      console.error('Error generating summary:', error);
-      showToastError('Failed to generate summary', 'Please try again');
-      setShowSummary(false);
-    }
-  };
-  
   const handleStopGeneration = () => {
     stopGeneration();
     showToastSuccess('Generation stopped', 'Response generation was interrupted');
@@ -443,8 +481,9 @@ export const Chat: React.FC = () => {
       // Show loading state
       setShowWelcomeMessage(false);
       
-      // Determine if we're dealing with images or videos
+      // Determine if we're dealing with images, videos, or audio
       const isVideo = files.some(file => file.type.startsWith('video/'));
+      const isAudio = files.some(file => file.type.startsWith('audio/'));
       
       // First, add the user message with isEncrypted property to the backend
       // This will also update the UI state through the chat store
@@ -456,7 +495,14 @@ export const Chat: React.FC = () => {
       let response = '';
       
       // Process the media based on type
-      if (isVideo) {
+      if (isAudio) {
+        // For audio files, use the audio analysis function
+        if (prompt.toLowerCase().includes('transcript') || prompt.toLowerCase().includes('transcribe')) {
+          response = await transcribeAudio(files[0]);
+        } else {
+          response = await analyzeAudio(files[0], prompt);
+        }
+      } else if (isVideo) {
         // For videos, use the video analysis function
         response = await analyzeVideo(files[0], prompt);
       } else if (files.length === 1) {
@@ -482,7 +528,19 @@ export const Chat: React.FC = () => {
   // Update the handleSend function to match the expected signature
   // This will fix the type mismatch with ChatInput's onSend prop
   const handleSendWrapper = (content: string, files?: File[]) => {
-    if (files && files.length > 0) {
+    // If there are media files, automatically use vision mode by switching to Gemini
+    if (files && files.length > 0 && (
+      files.some(file => file.type.startsWith('image/')) || 
+      files.some(file => file.type.startsWith('video/')) ||
+      files.some(file => file.type.startsWith('audio/'))
+    )) {
+      // If we're not already in Gemini mode, switch to it for the media analysis
+      if (apiMode !== 'gemini') {
+        setApiMode('gemini');
+      }
+      // Route to vision analysis for media files
+      handleAnalyzeWithVision(content, files);
+    } else if (files && files.length > 0) {
       // If file is an array, use the first file for backward compatibility
       handleSend(content, files[0]);
     } else {
@@ -490,8 +548,43 @@ export const Chat: React.FC = () => {
     }
   };
 
+  // Function to handle sharing the conversation
+  const handleShareConversation = async () => {
+    if (!currentConversationId) return;
+    
+    // Create the shareable URL
+    const shareUrl = `${window.location.origin}/chat/${currentConversationId}`;
+    
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareToastVisible(true);
+      showToastSuccess('Link copied to clipboard', 'You can now share this conversation');
+      
+      // Update URL without reloading the page
+      window.history.replaceState(null, '', `/chat/${currentConversationId}`);
+      
+      // Hide toast after 3 seconds
+      setTimeout(() => {
+        setShareToastVisible(false);
+      }, 3000);
+    } catch (error) {
+      console.error('Error copying to clipboard:', error);
+      showToastError('Failed to copy link', 'Please try again');
+    }
+  };
+
   return (
     <div className="flex h-screen overflow-hidden bg-background">
+      {/* Show loader when initializing */}
+      {localLoading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-background/80 z-50 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+            <div className="text-sm text-muted-foreground">Loading your conversation...</div>
+          </div>
+        </div>
+      )}
+    
       {/* Sidebar */}
       <AnimatePresence>
         {sidebarOpen && (
@@ -565,7 +658,15 @@ export const Chat: React.FC = () => {
                       onClick={() => navigate('/history')}
                     >
                       <HistoryIcon className="h-4 w-4 mr-2" />
-                      View All History
+                      <span>View All History</span>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="w-full justify-start"
+                      onClick={() => navigate('/models')}
+                    >
+                      <Zap className="h-4 w-4 mr-2" />
+                      <span>AI Models</span>
                     </Button>
                   </div>
                 </div>
@@ -594,15 +695,19 @@ export const Chat: React.FC = () => {
               <div className="px-4 py-2 space-y-1">
                 <button
                   onClick={() => setApiMode(apiMode === 'lmstudio' ? 'gemini' : 'lmstudio')}
-                  className="flex items-center space-x-2 w-full px-3 py-2 text-sm rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                  className={`flex items-center space-x-2 w-full px-3 py-2 text-sm rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors ${apiMode === 'gemini' ? 'bg-blue-100 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800' : ''}`}
                   title={`Switch to ${apiMode === 'lmstudio' ? 'Gemini' : 'LMStudio'} API`}
                 >
                   <Zap className={`h-4 w-4 ${apiMode === 'gemini' ? 'text-blue-500' : 'text-gray-500'}`} />
-                  <span>
-                    API Mode: <span className={`font-medium ${apiMode === 'gemini' ? 'text-blue-500' : ''}`}>
+                  <div className="flex flex-col">
+                    <span className="font-medium flex items-center">
                       {apiMode === 'lmstudio' ? 'Local LM Studio' : 'Google Gemini'}
+                      {apiMode === 'gemini' && <span className="ml-1 text-xs text-blue-500 font-normal">(Default)</span>}
                     </span>
-                  </span>
+                    {apiMode === 'gemini' && (
+                      <span className="text-xs text-blue-400">Gemini 2.5 Pro Experimental</span>
+                    )}
+                  </div>
                 </button>
               </div>
             </div>
@@ -644,6 +749,27 @@ export const Chat: React.FC = () => {
                 </h1>
               </div>
               <div className="flex items-center space-x-2">
+                {currentConversationId && messages.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleShareConversation}
+                    className="h-8 w-8 p-0 rounded-full relative"
+                    title="Share Conversation"
+                  >
+                    <Share2 className="h-4 w-4" />
+                    {shareToastVisible && (
+                      <motion.span
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 10 }}
+                        className="absolute -bottom-8 -left-6 text-xs bg-green-500 text-white px-2 py-1 rounded whitespace-nowrap"
+                      >
+                        Link copied!
+                      </motion.span>
+                    )}
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
@@ -701,36 +827,6 @@ export const Chat: React.FC = () => {
             className="flex-1 overflow-y-auto p-4 md:p-6 pt-16 scroll-smooth"
           >
             <div className="max-w-3xl mx-auto space-y-4">
-              {/* Summary panel */}
-              <AnimatePresence>
-                {showSummary && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="border border-primary/20 bg-primary/5 rounded-lg p-4 mb-4"
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="flex items-center gap-2">
-                        <Sparkles className="h-4 w-4 text-primary" />
-                        <h3 className="font-medium text-primary">Conversation Summary</h3>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setShowSummary(false)}
-                        className="h-6 w-6 p-0 rounded-full"
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                    <div className="whitespace-pre-line text-sm">
-                      {chatSummary}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-              
               <AnimatePresence initial={false}>
                 {showWelcomeMessage && messages.length === 0 ? (
                   <motion.div
@@ -890,22 +986,32 @@ export const Chat: React.FC = () => {
                     </div>
                   </motion.div>
                 ) : (
-                  messages.map((message) => (
-                    <ChatMessage
-                      key={message.id}
-                      {...message}
-                      onDelete={
-                        message.role === 'user'
-                          ? () => deleteMessage(message.id)
-                          : undefined
-                      }
-                      onEdit={
-                        message.role === 'user' && !message.id.startsWith('temp-')
-                          ? handleEditMessage
-                          : undefined
-                      }
-                    />
-                  ))
+                  messages.map((message, index) => {
+                    // Find the last assistant message
+                    const assistantMessages = messages.filter(m => m.role === 'assistant');
+                    const isLastAssistantMessage = message.role === 'assistant' && 
+                      assistantMessages.length > 0 && 
+                      message.id === assistantMessages[assistantMessages.length - 1].id;
+                    
+                    return (
+                      <ChatMessage
+                        key={message.id}
+                        {...message}
+                        onDelete={
+                          message.role === 'user'
+                            ? () => deleteMessage(message.id)
+                            : undefined
+                        }
+                        onEdit={
+                          message.role === 'user' && !message.id.startsWith('temp-')
+                            ? handleEditMessage
+                            : undefined
+                        }
+                        isLastAssistantMessage={isLastAssistantMessage}
+                        onRegenerate={isLastAssistantMessage ? handleRegenerateResponse : undefined}
+                      />
+                    );
+                  })
                 )}
               </AnimatePresence>
             </div>
@@ -932,40 +1038,6 @@ export const Chat: React.FC = () => {
             <div className="absolute top-4 right-4 flex gap-2 z-20">
               {currentConversationId && messages.length > 0 && (
                 <>
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                  >
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={generateChatSummary}
-                      className="text-xs bg-card/80 backdrop-blur-sm shadow-md"
-                      title="Generate Summary"
-                    >
-                      <Sparkles className="h-3.5 w-3.5 mr-1" />
-                      Summary
-                    </Button>
-                  </motion.div>
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                  >
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleRegenerateResponse}
-                      className="text-xs bg-card/80 backdrop-blur-sm shadow-md"
-                      title="Regenerate Response"
-                    >
-                      <RefreshCw className="h-3.5 w-3.5 mr-1" />
-                      Regenerate
-                    </Button>
-                  </motion.div>
                   <motion.div
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}

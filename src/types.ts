@@ -5,7 +5,7 @@ export interface Message {
     timestamp: string;
     conversation_id?: string;
     attachment?: {
-      type: 'document' | 'image';
+      type: 'document' | 'image' | 'audio' | 'video';
       name: string;
       url: string;
       size: number;

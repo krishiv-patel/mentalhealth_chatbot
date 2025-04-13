@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Pencil, Trash2, BrainCircuit, X, Image, Maximize, FileText, ArrowDown } from 'lucide-react';
+import { User, Pencil, Trash2, BrainCircuit, X, Image, Maximize, FileText, ArrowDown, RefreshCw, Music, Video } from 'lucide-react';
 import { Button } from './ui/Button';
 import { cn } from '../lib/utils';
 import ReactMarkdown from 'react-markdown';
@@ -32,6 +32,8 @@ interface ChatMessageProps {
     url: string;
     size: number;
   };
+  isLastAssistantMessage?: boolean;
+  onRegenerate?: () => void;
 }
 
 export const ChatMessage: React.FC<ChatMessageProps> = ({
@@ -43,7 +45,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   onEdit,
   onDelete,
   className = '',
-  attachment
+  attachment,
+  isLastAssistantMessage = false,
+  onRegenerate
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState(content);
@@ -185,6 +189,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
               className="w-full resize-none p-3 min-h-[100px] pr-12 focus:ring-1 focus:ring-primary/50 border rounded-md bg-background"
               ref={textareaRef}
               onKeyDown={handleKeyDown}
+              autoFocus
             />
             <div className="absolute bottom-2 right-2 flex items-center gap-2">
               <Button 
@@ -198,9 +203,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
               <Button 
                 size="sm"
                 onClick={handleSaveEdit}
-                className="h-8 rounded-md px-3 hover:bg-primary/90"
+                className="h-8 rounded-md px-3 bg-primary hover:bg-primary/90 text-primary-foreground"
               >
-                Save
+                Send
               </Button>
             </div>
           </div>
@@ -269,7 +274,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
             {attachment && role === 'user' && (
               <>
                 <div className="mb-2">{content}</div>
-                {(attachment.type === 'image' || (attachment.name && attachment.name.match(/\.(jpeg|jpg|gif|png)$/i))) ? (
+                {/* Image attachments */}
+                {attachment.type === 'image' || (attachment.name && attachment.name.match(/\.(jpeg|jpg|gif|png|webp)$/i)) ? (
                   <div 
                     className="relative group inline-block cursor-pointer overflow-hidden rounded-md border border-border max-w-full mb-1"
                     onClick={() => openLightbox(attachment.url, attachment.name)}
@@ -287,6 +293,68 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                     <div className="absolute bottom-0 left-0 right-0 bg-black/60 py-0.5 px-1 text-xs text-white/90 truncate">
                       {attachment.name} ({formatFileSize(attachment.size)})
                     </div>
+                  </div>
+                ) : 
+                /* Audio attachments */
+                attachment.type === 'audio' || (attachment.name && attachment.name.match(/\.(mp3|wav|ogg|aac|flac|m4a)$/i)) ? (
+                  <div className="mb-2 p-2 bg-muted/30 rounded-md border border-border/50">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="bg-blue-500/10 p-2 rounded-md">
+                        <Music className="h-4 w-4 text-blue-500" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate">{attachment.name}</div>
+                        <div className="text-xs text-muted-foreground">{formatFileSize(attachment.size)}</div>
+                      </div>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => {
+                          const link = document.createElement('a');
+                          link.href = attachment.url;
+                          link.download = attachment.name;
+                          link.click();
+                        }}
+                        className="h-7 w-7 p-0 rounded-full"
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                    <audio controls className="w-full mt-1">
+                      <source src={attachment.url} type={`audio/${attachment.name.split('.').pop()}`} />
+                      Your browser does not support the audio element.
+                    </audio>
+                  </div>
+                ) :
+                /* Video attachments */
+                attachment.type === 'video' || (attachment.name && attachment.name.match(/\.(mp4|mov|avi|webm|mkv)$/i)) ? (
+                  <div className="mb-2 p-2 bg-muted/30 rounded-md border border-border/50">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="bg-purple-500/10 p-2 rounded-md">
+                        <Video className="h-4 w-4 text-purple-500" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate">{attachment.name}</div>
+                        <div className="text-xs text-muted-foreground">{formatFileSize(attachment.size)}</div>
+                      </div>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => {
+                          const link = document.createElement('a');
+                          link.href = attachment.url;
+                          link.download = attachment.name;
+                          link.click();
+                        }}
+                        className="h-7 w-7 p-0 rounded-full"
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                    <video controls className="w-full max-h-[250px] mt-1 bg-black rounded">
+                      <source src={attachment.url} type={`video/${attachment.name.split('.').pop()}`} />
+                      Your browser does not support the video element.
+                    </video>
                   </div>
                 ) : (
                   <div 
@@ -356,7 +424,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                 </ReactMarkdown>
                 
                 {/* Display attached image with lightbox support */}
-                {(attachment.type === 'image' || (attachment.name && attachment.name.match(/\.(jpeg|jpg|gif|png)$/i))) && (
+                {(attachment.type === 'image' || (attachment.name && attachment.name.match(/\.(jpeg|jpg|gif|png|webp)$/i))) && (
                   <div className="mb-2 mt-1">
                     <div 
                       className="relative group inline-block cursor-pointer overflow-hidden rounded-md border border-border max-w-full"
@@ -379,8 +447,76 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                   </div>
                 )}
                 
-                {/* Show attachment for non-image files */}
-                {!(attachment.type === 'image' || (attachment.name && attachment.name.match(/\.(jpeg|jpg|gif|png)$/i))) && (
+                {/* Audio attachment */}
+                {(attachment.type === 'audio' || (attachment.name && attachment.name.match(/\.(mp3|wav|ogg|aac|flac|m4a)$/i))) && (
+                  <div className="mb-2 p-2 bg-muted/30 rounded-md border border-border/50 mt-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="bg-blue-500/10 p-2 rounded-md">
+                        <Music className="h-4 w-4 text-blue-500" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate">{attachment.name}</div>
+                        <div className="text-xs text-muted-foreground">{formatFileSize(attachment.size)}</div>
+                      </div>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => {
+                          const link = document.createElement('a');
+                          link.href = attachment.url;
+                          link.download = attachment.name;
+                          link.click();
+                        }}
+                        className="h-7 w-7 p-0 rounded-full"
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                    <audio controls className="w-full mt-1">
+                      <source src={attachment.url} type={`audio/${attachment.name.split('.').pop()}`} />
+                      Your browser does not support the audio element.
+                    </audio>
+                  </div>
+                )}
+                
+                {/* Video attachment */}
+                {(attachment.type === 'video' || (attachment.name && attachment.name.match(/\.(mp4|mov|avi|webm|mkv)$/i))) && (
+                  <div className="mb-2 p-2 bg-muted/30 rounded-md border border-border/50 mt-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="bg-purple-500/10 p-2 rounded-md">
+                        <Video className="h-4 w-4 text-purple-500" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate">{attachment.name}</div>
+                        <div className="text-xs text-muted-foreground">{formatFileSize(attachment.size)}</div>
+                      </div>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => {
+                          const link = document.createElement('a');
+                          link.href = attachment.url;
+                          link.download = attachment.name;
+                          link.click();
+                        }}
+                        className="h-7 w-7 p-0 rounded-full"
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                    <video controls className="w-full max-h-[250px] mt-1 bg-black rounded">
+                      <source src={attachment.url} type={`video/${attachment.name.split('.').pop()}`} />
+                      Your browser does not support the video element.
+                    </video>
+                  </div>
+                )}
+                
+                {/* Show attachment for all other file types */}
+                {!(
+                  attachment.type === 'image' || (attachment.name && attachment.name.match(/\.(jpeg|jpg|gif|png|webp)$/i)) ||
+                  attachment.type === 'audio' || (attachment.name && attachment.name.match(/\.(mp3|wav|ogg|aac|flac|m4a)$/i)) ||
+                  attachment.type === 'video' || (attachment.name && attachment.name.match(/\.(mp4|mov|avi|webm|mkv)$/i))
+                ) && (
                   <div className="mt-2 flex items-center gap-2 p-2 bg-muted/30 rounded-md border border-border/50 text-sm">
                     <div className="bg-primary/10 p-2 rounded-md">
                       <FileIcon type={attachment.type || attachment.name.split('.').pop() || ''} />
@@ -392,7 +528,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                     <Button 
                       variant="ghost" 
                       size="sm"
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         const link = document.createElement('a');
                         link.href = attachment.url;
                         link.download = attachment.name;
@@ -412,29 +549,48 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
       
       {/* Message actions */}
       <AnimatePresence>
-        {!isEditing && !isTemporary && onEdit && onDelete && (
+        {!isEditing && !isTemporary && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="absolute right-0 top-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1"
           >
-            <Button 
-              size="sm" 
-              variant="ghost"
-              onClick={handleEdit}
-              className="h-7 w-7 p-0 rounded-full"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
-            <Button 
-              size="sm" 
-              variant="ghost"
-              onClick={() => onDelete(id)}
-              className="h-7 w-7 p-0 rounded-full"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
+            {/* Regenerate button only for assistant messages and if it's the last one */}
+            {role === 'assistant' && isLastAssistantMessage && onRegenerate && (
+              <Button 
+                size="sm" 
+                variant="ghost"
+                onClick={onRegenerate}
+                className="h-7 w-7 p-0 rounded-full"
+                title="Regenerate response"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            
+            {/* Edit button for user messages */}
+            {onEdit && (
+              <Button 
+                size="sm" 
+                variant="ghost"
+                onClick={handleEdit}
+                className="h-7 w-7 p-0 rounded-full"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {/* Delete button for user messages */}
+            {onDelete && (
+              <Button 
+                size="sm" 
+                variant="ghost"
+                onClick={() => onDelete(id)}
+                className="h-7 w-7 p-0 rounded-full"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -451,48 +607,15 @@ function formatFileSize(bytes: number): string {
 
 // Component to display appropriate file icon based on type
 const FileIcon: React.FC<{type: string}> = ({ type }) => {
-  // Handle both MIME types and file extensions
-  const fileType = type.toLowerCase();
+  const lowerType = type.toLowerCase();
   
-  // Check for image types
-  if (fileType.startsWith('image/') || fileType.match(/\.(jpg|jpeg|png|gif|bmp|webp)$/i)) {
-    return <Image className="h-4 w-4" />;
+  if (lowerType === 'audio' || lowerType.match(/^audio\//) || lowerType.match(/^(mp3|wav|ogg|aac|flac|m4a)$/)) {
+    return <Music className="h-4 w-4 text-blue-500" />;
+  } else if (lowerType === 'video' || lowerType.match(/^video\//) || lowerType.match(/^(mp4|mov|avi|webm|mkv)$/)) {
+    return <Video className="h-4 w-4 text-purple-500" />;
+  } else if (lowerType === 'image' || lowerType.match(/^image\//) || lowerType.match(/^(jpg|jpeg|png|gif|webp|svg)$/)) {
+    return <Image className="h-4 w-4 text-emerald-500" />;
+  } else {
+    return <FileText className="h-4 w-4 text-primary" />;
   }
-  
-  // Check for PDF
-  if (fileType === 'application/pdf' || fileType === 'pdf') {
-    return <FileText className="h-4 w-4 text-red-500" />;
-  }
-  
-  // Check for document types
-  if (
-    fileType.includes('document') || 
-    fileType.includes('word') || 
-    fileType.includes('office') ||
-    fileType.match(/\.(doc|docx|txt|rtf|odt)$/i)
-  ) {
-    return <FileText className="h-4 w-4 text-blue-500" />;
-  }
-  
-  // Check for spreadsheet types
-  if (
-    fileType.includes('spreadsheet') || 
-    fileType.includes('excel') || 
-    fileType.includes('csv') ||
-    fileType.match(/\.(xls|xlsx|csv|ods)$/i)
-  ) {
-    return <FileText className="h-4 w-4 text-green-500" />;
-  }
-  
-  // Check for presentation types
-  if (
-    fileType.includes('presentation') || 
-    fileType.includes('powerpoint') ||
-    fileType.match(/\.(ppt|pptx|odp)$/i)
-  ) {
-    return <FileText className="h-4 w-4 text-orange-500" />;
-  }
-  
-  // Default
-  return <FileText className="h-4 w-4" />;
 };

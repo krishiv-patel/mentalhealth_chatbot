@@ -2,9 +2,9 @@ import { Message } from '../types';
 import { extractTextFromFile } from './documentParser';
 import { LLMMessage, CompletionOptions } from './lmstudio';
 import { logInfo, logError, logWarning, LogCategory } from './logging';
+import { GEMINI_MODELS, DEFAULT_MODEL } from './constants';
 
 const GEMINI_API_KEY = 'AIzaSyDIwt9lsWFQ6SpiLIthO8m_EbB1RpLJsug';
-const GEMINI_MODEL = 'gemini-2.0-flash';
 
 // Import the GoogleGenAI package
 import { GoogleGenAI, createUserContent, createPartFromUri } from "@google/genai";
@@ -97,7 +97,7 @@ export async function getChatCompletionStreamGemini(
     // Create a chat instance with history if there are messages
     try {
       const chat = ai.chats.create({
-        model: GEMINI_MODEL,
+        model: DEFAULT_MODEL,
         history: conversationHistory.length > 0 ? conversationHistory.slice(0, -1) : []
       });
 
@@ -205,7 +205,7 @@ export async function processImageWithGemini(imageFile: File, prompt: string) {
     
     // Generate content with the image and prompt
     const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
+      model: DEFAULT_MODEL,
       contents: [
         createUserContent([
           prompt,

@@ -49,7 +49,7 @@
   }
 
   /* Global Transitions */
-  a, button, input, textarea, select, summary {
+  a, button, input, textarea, select, {
     transition: all 0.2s ease-in-out;
   }
 

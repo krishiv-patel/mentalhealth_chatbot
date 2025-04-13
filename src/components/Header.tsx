@@ -16,7 +16,8 @@ import {
   X,
   History as HistoryIcon,
   FileText,
-  Sparkles
+  Sparkles,
+  Zap
 } from 'lucide-react';
 import { useTheme } from './ThemeProvider';
 import { useProfileStore } from '../store/useProfileStore';
@@ -104,6 +105,15 @@ export const Header: React.FC = () => {
             >
               <Sparkles className="h-3.5 w-3.5" />
               Vision Test
+            </Link>
+            <Link 
+              to="/models" 
+              className={`text-sm font-medium hover:text-primary transition-colors flex items-center gap-1 ${
+                location.pathname === '/models' ? 'text-primary' : 'text-muted-foreground'
+              }`}
+            >
+              <Zap className="h-3.5 w-3.5" />
+              AI Models
             </Link>
             {user && (
               <Link 
@@ -274,6 +284,14 @@ export const Header: React.FC = () => {
           >
             <Sparkles className="h-4 w-4" />
             Vision Test
+          </Link>
+          <Link 
+            to="/models" 
+            className="text-lg font-medium w-full text-center py-3 hover:bg-muted rounded-lg transition-colors flex items-center justify-center gap-2"
+            onClick={() => document.body.classList.remove('mobile-menu-open')}
+          >
+            <Zap className="h-4 w-4" />
+            AI Models
           </Link>
           {user && (
             <Link 

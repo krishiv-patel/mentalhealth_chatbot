@@ -71,7 +71,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isGenerating: false,
   isEncryptionEnabled: false,
   isEncryptionInitialized: false,
-  apiMode: (typeof localStorage !== 'undefined' && localStorage.getItem('apiMode') as 'lmstudio' | 'gemini') || 'lmstudio',
+  apiMode: (typeof localStorage !== 'undefined' && localStorage.getItem('apiMode') as 'lmstudio' | 'gemini') || 'gemini',
   
   // Initialize encryption for the current user
   initializeEncryption: async () => {
@@ -214,6 +214,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       try {
         // Ensure the file type is supported before uploading
         const isImage = file.type.startsWith('image/');
+        const isAudio = file.type.startsWith('audio/');
+        const isVideo = file.type.startsWith('video/');
         const isDocument = file.type === 'application/pdf' || 
                           file.type === 'text/plain' ||
                           file.type === 'text/csv' ||
@@ -222,61 +224,99 @@ export const useChatStore = create<ChatState>((set, get) => ({
         
         // If file has no type, try to infer from extension
         const extension = fileName.split('.').pop()?.toLowerCase();
-        const hasValidExtension = extension && ['txt', 'pdf', 'doc', 'docx', 'csv', 'jpg', 'jpeg', 'png', 'gif'].includes(extension);
+        const hasValidExtension = extension && [
+          'txt', 'pdf', 'doc', 'docx', 'csv', 
+          'jpg', 'jpeg', 'png', 'gif',
+          'mp3', 'wav', 'ogg', 'aac', 'flac', 'm4a',
+          'mp4', 'mov', 'avi', 'webm'
+        ].includes(extension);
         
-        if (!isImage && !isDocument && !hasValidExtension) {
-          set({ error: 'Unsupported file type. Please upload text documents, PDFs, or images.' });
+        if (!isImage && !isAudio && !isVideo && !isDocument && !hasValidExtension) {
+          set({ error: 'Unsupported file type. Please upload text documents, PDFs, images, audio, or video files.' });
           logError(LogCategory.FILE, "Unsupported file type", null, get().currentConversationId, { fileType: file.type, fileName });
           return;
         }
         
-        // Check if bucket exists first to avoid cryptic errors
-        const { data: buckets, error: bucketsError } = await supabase.storage
-          .listBuckets();
-          
-        if (bucketsError) {
-          console.error('Error checking buckets:', bucketsError);
-          set({ error: `Storage error: ${bucketsError.message}. Please try again later.` });
-          logError(LogCategory.FILE, "Failed to check storage buckets", null, get().currentConversationId, { error: bucketsError.message });
-          return;
-        }
+        // Try direct upload first - this handles the case where the bucket exists but listBuckets might have permission issues
+        console.log('Attempting direct upload to mentalhealth bucket...');
+        let uploadSuccess = false;
         
-        // Check if attachments bucket exists
-        const attachmentsBucket = buckets?.find(bucket => bucket.name === 'mentalhealth');
-        
-        if (!attachmentsBucket) {
-          console.error('Mentalhealth bucket not found');
-          set({ error: 'Storage configuration error: mentalhealth bucket not found. Please contact support.' });
-          logError(LogCategory.FILE, "Mentalhealth bucket not found", null, get().currentConversationId);
-          return;
-        }
-        
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('mentalhealth')
-          .upload(filePath, file);
+        try {
+          const { data: directData, error: directUploadError } = await supabase.storage
+            .from('mentalhealth')
+            .upload(filePath, file, {
+              upsert: true
+            });
+            
+          if (!directUploadError) {
+            // Direct upload worked, let's proceed
+            console.log('Direct upload succeeded, skipping bucket check');
+            uploadSuccess = true;
+            
+            const { data: urlData } = await supabase.storage
+              .from('mentalhealth')
+              .getPublicUrl(filePath);
 
-        if (uploadError) {
-          console.error('File upload error:', uploadError);
-          logError(LogCategory.FILE, "File upload error", null, get().currentConversationId, { error: uploadError.message, fileName });
-          throw uploadError;
+            // Determine attachment type based on file type
+            const fileType = file.type;
+            let attachmentType = 'document';
+            
+            if (fileType.startsWith('image/')) {
+              attachmentType = 'image';
+            } else if (fileType.startsWith('audio/')) {
+              attachmentType = 'audio';
+            } else if (fileType.startsWith('video/')) {
+              attachmentType = 'video';
+            }
+
+            tempMessage.attachment = {
+              type: attachmentType,
+              name: fileName,
+              url: urlData.publicUrl,
+              size: file.size
+            };
+            
+            logInfo(LogCategory.FILE, "File uploaded successfully", null, get().currentConversationId, { 
+              fileName, 
+              fileType: file.type, 
+              fileSize: file.size 
+            });
+          } else {
+            // If upload fails with permission error, check if bucket exists with listBuckets
+            console.log('Direct upload failed, checking buckets...', directUploadError);
+            
+            // Check if bucket exists first to avoid cryptic errors
+            const { data: buckets, error: bucketsError } = await supabase.storage
+              .listBuckets();
+              
+            if (bucketsError) {
+              console.error('Error checking buckets:', bucketsError);
+              set({ error: `Storage error: ${bucketsError.message}. Please try again later.` });
+              logError(LogCategory.FILE, "Failed to check storage buckets", null, get().currentConversationId, { error: bucketsError.message });
+              return;
+            }
+            
+            console.log('Available buckets:', buckets?.map(b => b.name));
+            
+            // Check if attachments bucket exists
+            const mentalhealthBucket = buckets?.find(bucket => bucket.name === 'mentalhealth');
+            
+            if (!mentalhealthBucket) {
+              console.error('Mentalhealth bucket not found');
+              set({ error: 'Storage configuration error: mentalhealth bucket not found. Please contact support.' });
+              logError(LogCategory.FILE, "Mentalhealth bucket not found", null, get().currentConversationId);
+              return;
+            }
+            
+            // Bucket exists but upload still failed for some other reason
+            throw directUploadError;
+          }
+        } catch (error: any) {
+          // Only rethrow if we didn't succeed with the direct upload
+          if (!uploadSuccess) {
+            throw error;
+          }
         }
-
-        const { data: urlData } = await supabase.storage
-          .from('mentalhealth')
-          .getPublicUrl(filePath);
-
-        tempMessage.attachment = {
-          type: file.type.startsWith('image/') ? 'image' : 'document',
-          name: fileName,
-          url: urlData.publicUrl,
-          size: file.size
-        };
-        
-        logInfo(LogCategory.FILE, "File uploaded successfully", null, get().currentConversationId, { 
-          fileName, 
-          fileType: file.type, 
-          fileSize: file.size 
-        });
       } catch (error: any) {
         console.error('Error uploading file:', error);
         set({ error: `Failed to upload file: ${error.message}. Please try again.` });

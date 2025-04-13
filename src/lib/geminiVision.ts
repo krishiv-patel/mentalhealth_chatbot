@@ -1,8 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { logInfo, logError, logWarning, LogCategory } from './logging';
+import { DEFAULT_MODEL } from './constants';
 
 const GEMINI_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY || '';
-const GEMINI_MODEL = 'gemini-1.5-pro';
 
 // Initialize the AI with the API key
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
@@ -37,7 +37,7 @@ export async function analyzeImage(file: File, prompt: string) {
     });
     
     const imagePart = await fileToGenerativePart(file);
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const model = genAI.getGenerativeModel({ model: DEFAULT_MODEL });
     
     const result = await model.generateContent([prompt, imagePart]);
     
@@ -64,7 +64,7 @@ export async function analyzeMultipleImages(files: File[], prompt: string) {
     });
     
     const imageParts = await Promise.all(files.map(file => fileToGenerativePart(file)));
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const model = genAI.getGenerativeModel({ model: DEFAULT_MODEL });
     
     const result = await model.generateContent([...imageParts, prompt]);
     
@@ -92,7 +92,7 @@ export async function analyzeVideo(file: File, prompt: string) {
     });
     
     const videoPart = await fileToGenerativePart(file);
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const model = genAI.getGenerativeModel({ model: DEFAULT_MODEL });
     
     const result = await model.generateContent([prompt, videoPart]);
     
@@ -123,7 +123,7 @@ export async function analyzeYouTubeVideo(youtubeUrl: string, prompt: string) {
       throw new Error("Invalid YouTube URL format");
     }
     
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const model = genAI.getGenerativeModel({ model: DEFAULT_MODEL });
     const result = await model.generateContent([
       prompt,
       { text: `YouTube Video: ${youtubeUrl}` }
@@ -193,7 +193,7 @@ export async function detectObjectsInImage(file: File, objectQuery: string) {
     });
     
     const imagePart = await fileToGenerativePart(file);
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const model = genAI.getGenerativeModel({ model: DEFAULT_MODEL });
     
     // Construct a prompt that asks for bounding box coordinates
     const prompt = `Detect ${objectQuery} in this image. Return the bounding box coordinates in the format [ymin, xmin, ymax, xmax]. The coordinates should be normalized between 0 and 1000.`;
@@ -208,6 +208,74 @@ export async function detectObjectsInImage(file: File, objectQuery: string) {
     return response;
   } catch (error) {
     logError(LogCategory.CHAT, "Error detecting objects in image", null, null, { 
+      error: (error as Error).message
+    });
+    throw error;
+  }
+}
+
+/**
+ * Process an audio file using Gemini API
+ */
+export async function analyzeAudio(file: File, prompt: string) {
+  try {
+    logInfo(LogCategory.CHAT, "Analyzing audio with Gemini API", null, null, { 
+      fileName: file.name, fileSize: file.size, promptLength: prompt.length
+    });
+    
+    const audioPart = await fileToGenerativePart(file);
+    const model = genAI.getGenerativeModel({ model: DEFAULT_MODEL });
+    
+    const result = await model.generateContent([prompt, audioPart]);
+    
+    logInfo(LogCategory.CHAT, "Successfully analyzed audio with Gemini", null, null, { 
+      responseLength: result.response.text().length
+    });
+    
+    return result.response.text();
+  } catch (error) {
+    logError(LogCategory.CHAT, "Error analyzing audio with Gemini", null, null, { 
+      error: (error as Error).message
+    });
+    throw error;
+  }
+}
+
+/**
+ * Transcribe audio file with timestamps
+ */
+export async function transcribeAudio(file: File) {
+  try {
+    logInfo(LogCategory.CHAT, "Transcribing audio", null, null, { 
+      fileName: file.name 
+    });
+    
+    // Use the audio analysis function with a specific transcription prompt
+    return analyzeAudio(file, "Generate a complete transcript of this audio file with timestamps.");
+  } catch (error) {
+    logError(LogCategory.CHAT, "Error transcribing audio", null, null, { 
+      error: (error as Error).message
+    });
+    throw error;
+  }
+}
+
+/**
+ * Analyze audio with specific timestamp focus
+ */
+export async function getAudioTimestampContent(file: File, timestamps: string[], prompt: string) {
+  try {
+    logInfo(LogCategory.CHAT, "Getting timestamp specific content from audio", null, null, { 
+      fileName: file.name, timestamps, promptLength: prompt.length
+    });
+    
+    // Format the prompt to include timestamps
+    const timestampPrompt = `${prompt} Specifically focus on timestamps: ${timestamps.join(', ')}`;
+    
+    // Use the standard audio analysis method
+    return analyzeAudio(file, timestampPrompt);
+  } catch (error) {
+    logError(LogCategory.CHAT, "Error getting timestamp content from audio", null, null, { 
       error: (error as Error).message
     });
     throw error;

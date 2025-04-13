@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Paperclip, X, Image, Loader2, FileText, Square, FileImage, Plus, Maximize, MinusCircle, Eye, HelpCircle } from 'lucide-react';
+import { Send, Paperclip, X, Image, Loader2, FileText, Square, FileImage, Plus, Maximize, MinusCircle, Eye, HelpCircle, Music } from 'lucide-react';
 import { Button } from './ui/Button';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
@@ -37,9 +37,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
   const [fileUploading, setFileUploading] = useState(false);
   const [fileUploadingName, setFileUploadingName] = useState('');
-  const [useVisionAnalysis, setUseVisionAnalysis] = useState(false);
+  const [useVisionAnalysis, setUseVisionAnalysis] = useState(true);
 
   // Resize textarea as content grows
   useEffect(() => {
@@ -61,6 +62,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     };
   }, [selectedFiles]);
 
+  // Set vision to true whenever files are added
+  useEffect(() => {
+    if (selectedFiles.length > 0 && apiMode === 'gemini') {
+      setUseVisionAnalysis(true);
+    }
+  }, [selectedFiles, apiMode]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (isGenerating) {
@@ -69,7 +77,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     }
     
     if (message.trim() || selectedFiles.length > 0) {
-      if (useVisionAnalysis && onAnalyzeWithVision && selectedFiles.length > 0) {
+      if (useVisionAnalysis && onAnalyzeWithVision && selectedFiles.length > 0 && apiMode === 'gemini') {
         // Use Vision API for analysis
         onAnalyzeWithVision(message, selectedFiles.map(f => f.file));
       } else {
@@ -86,7 +94,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         }
       });
       setSelectedFiles([]);
-      setUseVisionAnalysis(false);
+      // Keep vision set to true
+      setUseVisionAnalysis(true);
       
       // Reset textarea height
       if (textareaRef.current) {
@@ -156,6 +165,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     if (imageInputRef.current) {
       imageInputRef.current.value = '';
     }
+    if (audioInputRef.current) {
+      audioInputRef.current.value = '';
+    }
   };
 
   const handleImageClick = (previewUrl: string, fileName: string) => {
@@ -210,48 +222,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const hasImages = selectedFiles.some(f => f.file.type.startsWith('image/'));
 
   const renderVisionToggle = () => {
-    const [showInfo, setShowInfo] = useState(false);
-    
-    if (!(apiMode === 'gemini' && selectedFiles.length > 0)) {
-      return null;
-    }
-    
-    return (
-      <div className="relative">
-        <button
-          type="button"
-          className={`flex items-center space-x-1 text-xs px-2 py-1 rounded ${useVisionAnalysis ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'}`}
-          onClick={() => setUseVisionAnalysis(!useVisionAnalysis)}
-          title={useVisionAnalysis ? 'Using Gemini Vision to analyze media' : 'Click to use Gemini Vision for media analysis'}
-        >
-          <Eye className={`h-3.5 w-3.5 ${useVisionAnalysis ? 'text-green-600 dark:text-green-400' : ''}`} />
-          <span>{useVisionAnalysis ? 'Vision On' : 'Vision Off'}</span>
-        </button>
-        
-        <button
-          type="button"
-          className="ml-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-          onClick={() => setShowInfo(!showInfo)}
-        >
-          <HelpCircle className="h-3.5 w-3.5" />
-        </button>
-        
-        {showInfo && (
-          <div className="absolute bottom-full mb-2 left-0 w-64 p-2 bg-white dark:bg-gray-800 rounded shadow-lg text-xs z-10 dark:text-gray-200">
-            <p className="mb-1 font-medium">Gemini Vision Mode</p>
-            <p className="mb-1">When enabled, your media will be analyzed using Gemini's advanced vision capabilities.</p>
-            <p className="mb-1">Great for:</p>
-            <ul className="list-disc ml-4 mb-1">
-              <li>Describing images in detail</li>
-              <li>Analyzing video content</li>
-              <li>Detecting objects in images</li>
-              <li>Transcribing videos with visual context</li>
-            </ul>
-            <p>Only available with Gemini API mode.</p>
-          </div>
-        )}
-      </div>
-    );
+    // Return null to hide the vision toggle completely
+    return null;
   };
 
   const renderAttachmentOptions = () => {
@@ -264,8 +236,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         >
           <Paperclip className="h-5 w-5" />
         </button>
-        
-        {renderVisionToggle()}
       </div>
     );
   };
@@ -289,15 +259,21 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         {isGenerating ? (
           <Square className="h-5 w-5" />
         ) : (
-          <div className="relative">
-            <Send className="h-5 w-5" />
-            {useVisionAnalysis && (
-              <div className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-green-500"></div>
-            )}
-          </div>
+          <Send className="h-5 w-5" />
         )}
       </Button>
     );
+  };
+
+  // Helper function to get file icon by type
+  const getFileIcon = (fileType: string) => {
+    if (fileType.startsWith('image/')) {
+      return <Image className="h-3 w-3 text-primary flex-shrink-0" />;
+    } else if (fileType.startsWith('audio/')) {
+      return <Music className="h-3 w-3 text-blue-500 flex-shrink-0" />;
+    } else {
+      return <FileText className="h-3 w-3 text-primary flex-shrink-0" />;
+    }
   };
 
   return (
@@ -421,7 +397,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                     key={`file-${fileObj.id}`} 
                     className="relative flex items-center rounded-md border border-border/50 p-1 gap-1 text-xs"
                   >
-                    <FileText className="h-3 w-3 text-primary flex-shrink-0" />
+                    {getFileIcon(fileObj.file.type)}
                     <div className="flex-1 truncate">{fileObj.file.name}</div>
                     <Button
                       type="button"
@@ -447,7 +423,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             <div className="flex flex-wrap gap-1 mt-1">
               {selectedFiles.map((fileObj) => (
                 <div key={fileObj.id} className="flex items-center gap-1 py-0.5 px-2 rounded-full bg-background border text-xs">
-                  <FileText className="h-3 w-3 text-primary flex-shrink-0" />
+                  {getFileIcon(fileObj.file.type)}
                   <span className="truncate max-w-[150px]">{fileObj.file.name}</span>
                   <Button
                     type="button"
@@ -465,33 +441,35 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         </div>
       )}
       
-      <div className="relative">
-        <textarea
-          ref={textareaRef}
-          className={cn(
-            "w-full p-3.5 pr-16 rounded-xl border resize-none focus:ring-1 focus:ring-primary focus:outline-none",
-            isGenerating ? "bg-muted/30" : "bg-background dark:bg-card"
-          )}
-          placeholder={isGenerating ? "Generating response..." : promptPlaceholders[placeholderIndex]}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
-          onKeyDown={handleKeyDown}
-          rows={1}
-          disabled={disabled || isGenerating}
-          style={{ 
-            minHeight: isFocused ? "120px" : "", 
-            maxHeight: "400px" 
-          }}
-        />
-        
-        <div className="absolute right-2 bottom-2 flex gap-1.5 items-center">
-          {renderAttachmentOptions()}
+      <form onSubmit={handleSubmit}>
+        <div className="relative">
+          <textarea
+            ref={textareaRef}
+            className={cn(
+              "w-full p-3.5 pr-16 rounded-xl border resize-none focus:ring-1 focus:ring-primary focus:outline-none",
+              isGenerating ? "bg-muted/30" : "bg-background dark:bg-card"
+            )}
+            placeholder={isGenerating ? "Generating response..." : promptPlaceholders[placeholderIndex]}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
+            onKeyDown={handleKeyDown}
+            rows={1}
+            disabled={disabled}
+            style={{ 
+              minHeight: isFocused ? "120px" : "", 
+              maxHeight: "400px" 
+            }}
+          />
           
-          {renderSubmitButton()}
+          <div className="absolute right-2 bottom-2 flex gap-1.5 items-center">
+            {renderAttachmentOptions()}
+            
+            {renderSubmitButton()}
+          </div>
         </div>
-      </div>
+      </form>
       
       {showAttachmentOptions && !isGenerating && (
         <div className="absolute right-14 bottom-16 bg-card/90 backdrop-blur-sm border shadow-md rounded-lg p-3 z-10">
@@ -518,6 +496,17 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               <Image className="h-4 w-4" />
               <span>Image</span>
             </Button>
+            <Button 
+              onClick={() => {
+                audioInputRef.current?.click();
+                setShowAttachmentOptions(false);
+              }}
+              variant="ghost"
+              className="flex items-center justify-start gap-2 h-9 px-3 hover:bg-background"
+            >
+              <Music className="h-4 w-4" />
+              <span>Audio</span>
+            </Button>
           </div>
         </div>
       )}
@@ -535,6 +524,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         onChange={handleFileSelect}
         accept="image/*"
         multiple
+      />
+      <input
+        ref={audioInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleFileSelect}
+        accept="audio/*"
       />
     </div>
   );

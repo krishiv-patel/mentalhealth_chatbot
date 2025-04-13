@@ -2,6 +2,7 @@ import { Message } from '../types';
 import { format } from 'date-fns';
 import { supabase } from './supabase';
 import axios from 'axios';
+import { sendEmailNotification } from './email';
 
 interface ChatReport {
   title: string;
@@ -939,7 +940,10 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export async function downloadReport(html: string, filename: string, phoneNumber?: string) {
+export async function downloadReport(html: string, filename: string, phoneNumber?: string, userEmail?: string) {
+  console.log('Starting report download process...');
+  console.log('User email:', userEmail);
+  
   // Create and download the blob
   const blob = new Blob([html], { type: 'text/html' });
   const url = URL.createObjectURL(blob);
@@ -951,21 +955,48 @@ export async function downloadReport(html: string, filename: string, phoneNumber
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   
+  console.log('Report file downloaded successfully');
+  
   // Always use the hardcoded phone number for reliability
   const hardcodedNumber = '+918799399723';
   
   try {
+    // Send SMS notification
+    console.log('Sending SMS notification...');
     await sendSmsNotification(hardcodedNumber, `Your MindfulAI chat report "${filename}" has been generated and downloaded successfully.`);
     console.log('SMS notification sent successfully to', hardcodedNumber);
+
+    // Send email notification if email is provided
+    if (userEmail) {
+      console.log('Sending email notification to:', userEmail);
+      await sendEmailNotification(
+        userEmail,
+        'Your MindfulAI Chat Report is Ready',
+        `<p>Your chat report "${filename}" has been generated and downloaded successfully.</p>
+         <p>Thank you for using MindfulAI!</p>`
+      );
+      console.log('Email notification sent successfully');
+    } else {
+      console.log('No user email provided, skipping email notification');
+    }
   } catch (error) {
-    console.error('Failed to send SMS notification:', error);
+    console.error('Failed to send notifications:', error);
     // Retry once in case of failure
     try {
-      console.log('Retrying SMS notification...');
+      console.log('Retrying notifications...');
       await sendSmsNotification(hardcodedNumber, `Your MindfulAI chat report is ready. Filename: "${filename}"`);
-      console.log('SMS notification retry successful');
+      if (userEmail) {
+        console.log('Retrying email notification...');
+        await sendEmailNotification(
+          userEmail,
+          'Your MindfulAI Chat Report is Ready',
+          `<p>Your chat report "${filename}" has been generated and downloaded successfully.</p>
+           <p>Thank you for using MindfulAI!</p>`
+        );
+      }
+      console.log('Notification retry successful');
     } catch (retryError) {
-      console.error('SMS notification retry failed:', retryError);
+      console.error('Notification retry failed:', retryError);
     }
   }
 }
