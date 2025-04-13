@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Paperclip, X, Image, Loader2, FileText, Square, FileImage, Plus, Maximize, MinusCircle, Eye, HelpCircle, Music } from 'lucide-react';
+import { Send, Paperclip, X, Image, Loader2, FileText, Square, FileImage, Plus, Maximize, MinusCircle, Eye, HelpCircle, Music, Mic, MicOff } from 'lucide-react';
 import { Button } from './ui/Button';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
@@ -41,6 +41,17 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const [fileUploading, setFileUploading] = useState(false);
   const [fileUploadingName, setFileUploadingName] = useState('');
   const [useVisionAnalysis, setUseVisionAnalysis] = useState(true);
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeechSupported, setIsSpeechSupported] = useState(false);
+  const [temporaryTranscript, setTemporaryTranscript] = useState('');
+  
+  // Simple check if the browser supports speech recognition
+  useEffect(() => {
+    setIsSpeechSupported(
+      'webkitSpeechRecognition' in window || 
+      'SpeechRecognition' in window
+    );
+  }, []);
 
   // Resize textarea as content grows
   useEffect(() => {
@@ -180,6 +191,129 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     setLightboxFileName('');
   };
 
+  // Speech recognition functionality
+  const toggleSpeechRecognition = () => {
+    if (isListening) {
+      stopSpeechRecognition();
+    } else {
+      startSpeechRecognition();
+    }
+  };
+
+  const startSpeechRecognition = () => {
+    try {
+      // Reset temporary transcript when starting a new recording
+      setTemporaryTranscript('');
+      
+      // Use any to bypass TypeScript errors
+      // This is a workaround for the Web Speech API which doesn't have full TypeScript support
+      const SpeechRecognition = (window as any).SpeechRecognition || 
+                               (window as any).webkitSpeechRecognition;
+      
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = false; // Don't show interim results
+        recognition.lang = 'en-US';  // You can make this configurable
+        
+        recognition.onstart = () => {
+          setIsListening(true);
+        };
+        
+        recognition.onresult = (event: any) => {
+          // Handle speech recognition results
+          let transcript = '';
+          
+          for (let i = 0; i < event.results.length; i++) {
+            if (event.results[i][0].transcript) {
+              transcript += event.results[i][0].transcript + ' ';
+            }
+          }
+          
+          if (transcript) {
+            // Store in temporary transcript instead of directly in message
+            setTemporaryTranscript(transcript.trim());
+          }
+        };
+        
+        recognition.onerror = (event: any) => {
+          console.error('Speech recognition error', event.error);
+          setIsListening(false);
+          // If there's a usable transcript despite the error, apply it
+          if (temporaryTranscript) {
+            appendTranscriptToMessage(temporaryTranscript);
+          }
+        };
+        
+        recognition.onend = () => {
+          setIsListening(false);
+          // We don't automatically append the transcript here
+          // It will be handled in stopSpeechRecognition
+        };
+        
+        // Store the recognition instance in a global variable
+        // so we can access it in the cleanup function
+        (window as any).recognition = recognition;
+        
+        recognition.start();
+      }
+    } catch (error) {
+      console.error('Error starting speech recognition:', error);
+      setIsListening(false);
+    }
+  };
+
+  const appendTranscriptToMessage = (transcript: string) => {
+    if (!transcript) return;
+    
+    setMessage(prev => {
+      // If we already had text, make sure there's a space
+      return prev.trim().length > 0 ? `${prev.trim()} ${transcript}` : transcript;
+    });
+    
+    // Focus the textarea and clear the temporary transcript
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+    }
+    setTemporaryTranscript('');
+  };
+
+  const stopSpeechRecognition = () => {
+    try {
+      if ((window as any).recognition) {
+        (window as any).recognition.stop();
+        
+        // When stopping, append the temporary transcript to the message
+        if (temporaryTranscript) {
+          appendTranscriptToMessage(temporaryTranscript);
+        }
+        
+        setIsListening(false);
+      }
+    } catch (error) {
+      console.error('Error stopping speech recognition:', error);
+      setIsListening(false);
+      
+      // Try to append transcript even if there was an error stopping
+      if (temporaryTranscript) {
+        appendTranscriptToMessage(temporaryTranscript);
+      }
+    }
+  };
+
+  // Clean up speech recognition on unmount
+  useEffect(() => {
+    return () => {
+      if ((window as any).recognition) {
+        try {
+          (window as any).recognition.stop();
+        } catch (error) {
+          console.error('Error cleaning up speech recognition:', error);
+        }
+      }
+    };
+  }, []);
+
   const promptPlaceholders = [
     "Type your message...",
     "Ask me anything...",
@@ -229,6 +363,24 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const renderAttachmentOptions = () => {
     return (
       <div className="flex items-center space-x-2">
+        {isSpeechSupported && (
+          <button
+            type="button"
+            onClick={toggleSpeechRecognition}
+            className={`p-1 rounded-full transition-colors ${
+              isListening 
+                ? 'text-red-500 animate-pulse bg-red-100 dark:bg-red-900/30' 
+                : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'
+            }`}
+            title={isListening ? "Stop recording" : "Start voice input"}
+          >
+            {isListening ? (
+              <MicOff className="h-5 w-5" />
+            ) : (
+              <Mic className="h-5 w-5" />
+            )}
+          </button>
+        )}
         <button
           type="button"
           className={`text-gray-500 p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors ${showAttachmentOptions ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
@@ -447,9 +599,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             ref={textareaRef}
             className={cn(
               "w-full p-3.5 pr-16 rounded-xl border resize-none focus:ring-1 focus:ring-primary focus:outline-none",
-              isGenerating ? "bg-muted/30" : "bg-background dark:bg-card"
+              isGenerating ? "bg-muted/30" : "bg-background dark:bg-card",
+              isListening ? "border-red-500 focus:ring-red-500" : ""
             )}
-            placeholder={isGenerating ? "Generating response..." : promptPlaceholders[placeholderIndex]}
+            placeholder={isListening ? "Listening..." : isGenerating ? "Generating response..." : promptPlaceholders[placeholderIndex]}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onFocus={() => setIsFocused(true)}

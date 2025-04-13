@@ -175,7 +175,7 @@ export const Chat: React.FC = () => {
   // Call initialization when component mounts
   useEffect(() => {
     initializeChat();
-  }, [initializeChat]);
+  }, []);
 
   // Update messages when currentConversationId changes
   useEffect(() => {
