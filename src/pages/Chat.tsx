@@ -57,6 +57,7 @@ import {
 import { ai } from '../lib/ai';
 import { GEMINI_MODEL } from '../lib/constants';
 import { logInfo, logError, LogCategory } from '../lib/logging';
+import { v4 as uuidv4 } from 'uuid';
 
 export const Chat: React.FC = () => {
   const { id: conversationIdFromUrl } = useParams<{ id: string }>();
@@ -97,6 +98,7 @@ export const Chat: React.FC = () => {
   const [shareToastVisible, setShareToastVisible] = useState(false);
   const [initializationComplete, setInitializationComplete] = useState(false);
   const [localLoading, setLocalLoading] = useState(true);
+  const [processingMessages, setProcessingMessages] = useState<Record<string, boolean>>({});
 
   // Initialize chat - separate from the useEffect to prevent circular dependencies
   const initializeChat = useCallback(async () => {
@@ -111,12 +113,16 @@ export const Chat: React.FC = () => {
         try {
           // Try to set the current conversation from the URL parameter
           await setCurrentConversation(conversationIdFromUrl);
+          // For existing conversations, don't show welcome message
+          setShowWelcomeMessage(false);
         } catch (error) {
           console.error('Error loading conversation from URL:', error);
           showToastError('Could not load the requested conversation', 'Starting a new chat instead');
           const newConversationId = startNewConversation();
           // Update URL with the new conversation
           window.history.replaceState(null, '', `/chat/${newConversationId}`);
+          // For new conversations, show welcome message
+          setShowWelcomeMessage(true);
         }
       } else if (!currentConversationId) {
         try {
@@ -132,11 +138,15 @@ export const Chat: React.FC = () => {
               await setCurrentConversation(conversationId);
               // Update URL to include the conversation ID
               window.history.replaceState(null, '', `/chat/${conversationId}`);
+              // Existing conversation, don't show welcome
+              setShowWelcomeMessage(false);
             } else {
               // Start a new conversation if there are no existing ones
               const newConversationId = startNewConversation();
               // Update URL to include the new conversation ID
               window.history.replaceState(null, '', `/chat/${newConversationId}`);
+              // New conversation, show welcome
+              setShowWelcomeMessage(true);
             }
           }
         } catch (error) {
@@ -152,6 +162,9 @@ export const Chat: React.FC = () => {
           // Update URL to include the current conversation ID
           window.history.replaceState(null, '', `/chat/${currentConversationId}`);
         }
+        
+        // Set welcome message state based on whether there are messages
+        setShowWelcomeMessage(messages.length === 0);
       }
       
       setInitializationComplete(true);
@@ -184,6 +197,15 @@ export const Chat: React.FC = () => {
     }
   }, [currentConversationId, fetchMessages, initializationComplete]);
 
+  // Keep the showWelcomeMessage state synchronized with the store
+  useEffect(() => {
+    if (messages.length === 0 && !loading && initializationComplete) {
+      setShowWelcomeMessage(true);
+    } else if (messages.length > 0) {
+      setShowWelcomeMessage(false);
+    }
+  }, [messages.length, loading, initializationComplete]);
+
   // Define all handler functions before any useEffect hooks that use them
   const handleSend = async (content: string, file?: File) => {
     if (!content.trim() && !file) return;
@@ -210,6 +232,7 @@ export const Chat: React.FC = () => {
       
       if (result.isConfirmed) {
         startNewConversation();
+        setShowWelcomeMessage(true);
         showToastSuccess('New conversation started');
       }
     } else {
@@ -237,23 +260,69 @@ export const Chat: React.FC = () => {
 
   const generateReport = async (language: string = 'en') => {
     try {
-      if (!currentConversationId || messages.length === 0) return;
+      console.log('===== GENERATING REPORT =====');
+      if (!currentConversationId || messages.length === 0) {
+        console.log('Aborting report generation: No conversation ID or messages');
+        return;
+      }
+      
+      console.log('Current conversation ID:', currentConversationId);
+      console.log('Message count:', messages.length);
+      console.log('User email:', userEmail);
       
       const currentConversation = conversations.find(c => c.id === currentConversationId);
       const title = currentConversation?.title || 'Chat History';
+      console.log('Report title:', title);
       
       // Close the language selection modal
       setReportLanguageModalOpen(false);
       
       // Generate the report with the selected language
+      console.log('Generating report with language:', language);
       const data = await generateChatReport(messages, title, language);
       setReportData(data);
       setReportModalOpen(true);
       
       // Show a toast notification when report is ready
       showToastSuccess('Report generated successfully', 'Your conversation report is ready');
+      
+      // Send email notification to the user if email is available
+      if (userEmail) {
+        console.log('Attempting to send email notification to:', userEmail);
+        try {
+          // Import the email module dynamically with proper error handling
+          console.log('Importing email module...');
+          const emailModule = await import('../lib/email');
+          
+          console.log('Email module imported successfully');
+          const emailSubject = 'Your MindfulAI Chat Report is Ready';
+          const emailContent = `<p>Your chat report "${title}" has been generated and is ready to download.</p>
+                               <p>Please download it from the application.</p>
+                               <p>Thank you for using MindfulAI!</p>`;
+          
+          console.log('Sending email with subject:', emailSubject);
+          const emailResult = await emailModule.sendEmailNotification(
+            userEmail,
+            emailSubject,
+            emailContent
+          );
+          
+          console.log('Email notification result:', emailResult);
+          if (emailResult.success === false) {
+            console.error('Email API returned error:', emailResult.error);
+          }
+        } catch (emailError) {
+          console.error('Failed to send email notification:', emailError);
+          console.error('Error details:', JSON.stringify(emailError, null, 2));
+        }
+      } else {
+        console.log('No user email available, skipping email notification');
+      }
+      console.log('===== REPORT GENERATION COMPLETE =====');
     } catch (error) {
+      console.error('===== ERROR GENERATING REPORT =====');
       console.error('Error generating report:', error);
+      console.error('Error details:', JSON.stringify(error, null, 2));
       showToastError('Failed to generate report', 'Please try again later');
     }
   };
@@ -261,12 +330,23 @@ export const Chat: React.FC = () => {
   const downloadReportFile = (phoneNumber?: string) => {
     if (!reportData) return;
     
+    console.log('===== EXPORT CHAT REPORT STARTED =====');
+    console.log('Current user email address:', userEmail);
+    console.log('Report data language:', reportData.metadata?.language);
+    
     const html = generateHTML(reportData);
     // Include language in the filename if it's not English
     const langSuffix = reportData.metadata?.language !== 'en' ? `-${reportData.metadata.language}` : '';
     const filename = `mindfulai-chat${langSuffix}-${format(new Date(), 'yyyy-MM-dd')}.html`;
     
+    console.log('Calling downloadReport with parameters:');
+    console.log('- Filename:', filename);
+    console.log('- Phone number:', phoneNumber || 'none');
+    console.log('- User email:', userEmail || 'undefined');
+    
     downloadReport(html, filename, phoneNumber, userEmail || undefined);
+    
+    console.log('downloadReport function called');
   };
 
   const scrollToBottom = () => {
@@ -430,22 +510,26 @@ export const Chat: React.FC = () => {
   const handleRegenerateResponse = async () => {
     if (messages.length < 2) return;
     
-    // Find the last user message
+    // Find the last user message and last assistant message
     const userMessages = messages.filter(m => m.role === 'user');
-    if (userMessages.length === 0) return;
+    const assistantMessages = messages.filter(m => m.role === 'assistant');
     
-    const lastUserMessage = userMessages[userMessages.length - 1];
+    if (userMessages.length === 0 || assistantMessages.length === 0) return;
     
     try {
-      // Delete the last assistant message
-      const assistantMessages = messages.filter(m => m.role === 'assistant');
-      if (assistantMessages.length > 0) {
-        const lastAssistantMessage = assistantMessages[assistantMessages.length - 1];
-        await deleteMessage(lastAssistantMessage.id);
-      }
+      // Delete the last assistant message first
+      const lastAssistantMessage = assistantMessages[assistantMessages.length - 1];
+      await deleteMessage(lastAssistantMessage.id);
       
-      // Resend the last user message to get a new response
-      await addMessage({ role: 'user', content: lastUserMessage.content, isEncrypted: false });
+      // Wait a moment to ensure deletion is processed
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Trigger a new API call by sending the last user message again
+      // This will appear in the UI as if the user is simply regenerating the response
+      // without duplicating the user message
+      const lastUserMessage = userMessages[userMessages.length - 1];
+      await handleSend(lastUserMessage.content);
+      
       setScrolledToBottom(true);
     } catch (error) {
       console.error('Error regenerating response:', error);
@@ -477,6 +561,9 @@ export const Chat: React.FC = () => {
   const handleAnalyzeWithVision = async (prompt: string, files: File[]) => {
     if (!files.length) return;
     
+    // Create a temporary "thinking" message ID outside the try block so it's available in catch
+    const thinkingMessageId = `thinking-${uuidv4()}`;
+    
     try {
       // Show loading state
       setShowWelcomeMessage(false);
@@ -485,12 +572,40 @@ export const Chat: React.FC = () => {
       const isVideo = files.some(file => file.type.startsWith('video/'));
       const isAudio = files.some(file => file.type.startsWith('audio/'));
       
+      // Set initial messages to empty array if this is a new conversation to prevent welcome message
+      if (messages.length === 0) {
+        // Check if we're analyzing media in a new conversation
+        // If so, suppress the default welcome message by marking it as no longer new
+        useChatStore.setState(state => ({
+          ...state,
+          showWelcomeMessage: false 
+        }));
+      }
+      
       // First, add the user message with isEncrypted property to the backend
       // This will also update the UI state through the chat store
       await addMessage({ role: 'user', content: prompt, isEncrypted: false }, files);
       
       // Make sure we scroll to the bottom to show the user message and files
       setScrolledToBottom(true);
+      
+      // Create a temporary "thinking" message with a loading indicator
+      const thinkingMessage = {
+        id: thinkingMessageId,
+        role: 'assistant' as const,
+        content: '...',
+        timestamp: new Date().toISOString(),
+        isEncrypted: false,
+        isThinking: true // Special flag to identify this as a thinking message
+      };
+      
+      // Add the thinking message to local state
+      useChatStore.setState(state => ({
+        messages: [...state.messages, thinkingMessage]
+      }));
+      
+      // Set this message as processing
+      setProcessingMessages(prev => ({ ...prev, [thinkingMessageId]: true }));
       
       let response = '';
       
@@ -513,23 +628,142 @@ export const Chat: React.FC = () => {
         response = await analyzeMultipleImages(files, prompt);
       }
       
+      // Remove the thinking message before adding the real response
+      useChatStore.setState(state => ({
+        messages: state.messages.filter(msg => msg.id !== thinkingMessageId)
+      }));
+      
       // Add the assistant response with isEncrypted property
       if (response) {
         await addMessage({ role: 'assistant', content: response, isEncrypted: false });
+        
+        // Clear this message from processing
+        setProcessingMessages(prev => {
+          const updated = { ...prev };
+          delete updated[thinkingMessageId];
+          return updated;
+        });
+        
         setScrolledToBottom(true);
       }
       
     } catch (error) {
       console.error('Error analyzing media with Gemini Vision:', error);
       showToastError('Failed to analyze media', 'Please try again');
+      
+      // Remove the thinking message on error
+      useChatStore.setState(state => ({
+        messages: state.messages.filter(msg => msg.id !== thinkingMessageId || !('isThinking' in msg))
+      }));
+      
+      // Clear any processing state
+      setProcessingMessages(prev => {
+        const updated = { ...prev };
+        delete updated[thinkingMessageId];
+        return updated;
+      });
+    }
+  };
+
+  // Add this new function for YouTube handling above the handleSendWrapper
+  const handleYouTubeVideo = async (content: string, youtubeUrl: string) => {
+    try {
+      // Set initial messages to empty array if this is a new conversation to prevent welcome message
+      if (messages.length === 0) {
+        useChatStore.setState(state => ({
+          ...state,
+          showWelcomeMessage: false 
+        }));
+      }
+      
+      // Extract prompt without the URL
+      const promptWithoutUrl = content.replace(youtubeUrl, '').trim();
+      const promptToUse = promptWithoutUrl || "Analyze this video in detail, describing what you see.";
+      
+      // Use the standard message flow to maintain chat context
+      await addMessage({ role: 'user', content, isEncrypted: false });
+      
+      // Show that we're processing
+      setShowWelcomeMessage(false);
+      setScrolledToBottom(true);
+      
+      // Create a temporary "thinking" message with a loading indicator
+      const thinkingMessageId = `thinking-${uuidv4()}`;
+      const thinkingMessage = {
+        id: thinkingMessageId,
+        role: 'assistant' as const,
+        content: '...',
+        timestamp: new Date().toISOString(),
+        isEncrypted: false,
+        isThinking: true // Special flag to identify this as a thinking message
+      };
+      
+      // Add the thinking message to local state
+      useChatStore.setState(state => ({
+        messages: [...state.messages, thinkingMessage]
+      }));
+      
+      // Set this message as processing
+      setProcessingMessages(prev => ({ ...prev, [thinkingMessageId]: true }));
+      
+      // Analyze the YouTube video
+      const response = await analyzeYouTubeVideo(youtubeUrl, promptToUse);
+      
+      if (response) {
+        // Remove the thinking message
+        useChatStore.setState(state => ({
+          messages: state.messages.filter(msg => msg.id !== thinkingMessageId)
+        }));
+        
+        // Add the actual response using chat store's addMessage to maintain context
+        await addMessage({ role: 'assistant', content: response, isEncrypted: false });
+        
+        // Clear this message from processing
+        setProcessingMessages(prev => {
+          const updated = { ...prev };
+          delete updated[thinkingMessageId];
+          return updated;
+        });
+        
+        setScrolledToBottom(true);
+      }
+    } catch (error) {
+      console.error('Error processing YouTube video:', error);
+      showToastError('Failed to analyze YouTube video', 'Please try again');
+      
+      // Remove the thinking message on error
+      useChatStore.setState(state => ({
+        messages: state.messages.filter(msg => !('isThinking' in msg))
+      }));
+      
+      // Clear any processing state
+      setProcessingMessages({});
     }
   };
 
   // Update the handleSend function to match the expected signature
   // This will fix the type mismatch with ChatInput's onSend prop
   const handleSendWrapper = (content: string, files?: File[]) => {
+    // First check if content contains a YouTube URL
+    // Enhanced regex to better catch all YouTube URL variations including Shorts
+    const youtubeUrlRegex = /https?:\/\/(www\.)?(youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)[^\s&]+/g;
+    const youtubeMatches = content.match(youtubeUrlRegex);
+    
+    // If we have a YouTube URL in the message, process it with our special YouTube handler
+    if (youtubeMatches && youtubeMatches.length > 0) {
+      const youtubeUrl = youtubeMatches[0]; // Use the first match if multiple found
+      
+      // If we're not already in Gemini mode, switch to it for the YouTube analysis
+      if (apiMode !== 'gemini') {
+        setApiMode('gemini');
+      }
+      
+      // Handle with our special YouTube function
+      handleYouTubeVideo(content, youtubeUrl);
+      return; // Skip normal processing
+    }
     // If there are media files, automatically use vision mode by switching to Gemini
-    if (files && files.length > 0 && (
+    else if (files && files.length > 0 && (
       files.some(file => file.type.startsWith('image/')) || 
       files.some(file => file.type.startsWith('video/')) ||
       files.some(file => file.type.startsWith('audio/'))
@@ -541,7 +775,7 @@ export const Chat: React.FC = () => {
       // Route to vision analysis for media files
       handleAnalyzeWithVision(content, files);
     } else if (files && files.length > 0) {
-      // If file is an array, use the first file for backward compatibility
+      // For other types of files, use the first file and include the text message
       handleSend(content, files[0]);
     } else {
       handleSend(content);

@@ -44,6 +44,7 @@ interface ChatState {
   isEncryptionEnabled: boolean;
   isEncryptionInitialized: boolean;
   apiMode: 'lmstudio' | 'gemini';
+  showWelcomeMessage: boolean;
   addMessage: (message: Omit<Message, 'id' | 'timestamp' | 'conversation_id'>, files?: File | File[]) => Promise<void>;
   fetchMessages: () => Promise<void>;
   deleteMessage: (id: string) => Promise<void>;
@@ -72,6 +73,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isEncryptionEnabled: false,
   isEncryptionInitialized: false,
   apiMode: (typeof localStorage !== 'undefined' && localStorage.getItem('apiMode') as 'lmstudio' | 'gemini') || 'gemini',
+  showWelcomeMessage: true,
   
   // Initialize encryption for the current user
   initializeEncryption: async () => {
@@ -183,7 +185,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ 
       currentConversationId: newConversationId,
       messages: [],
-      error: null
+      error: null,
+      showWelcomeMessage: true
     });
     logInfo(LogCategory.CHAT, "Started new conversation", null, newConversationId);
     return newConversationId;

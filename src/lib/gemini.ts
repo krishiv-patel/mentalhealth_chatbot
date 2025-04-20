@@ -48,6 +48,17 @@ export async function getChatCompletionStreamGemini(
     // Add system message first if it exists
     const systemMessage = messages.find(msg => msg.role === 'system');
     let systemInstructionText = systemMessage ? systemMessage.content : '';
+    
+    // Add default system instruction if none exists
+    if (!systemInstructionText) {
+      systemInstructionText = `You are MindfulAI, a mental health assistant that provides supportive conversation and helpful advice.
+      
+Important: You MUST remember information from the current conversation to maintain context. When the user asks about things they've mentioned before, refer back to that information.
+
+For example, if they mention they like chocolate in an earlier message and later ask "What do I like?", you should answer "You mentioned that you like chocolate."
+
+Always pay attention to all prior messages in the conversation to maintain a helpful and coherent dialogue.`;
+    }
 
     // Prepare conversation messages
     const conversationHistory = [];
@@ -98,7 +109,7 @@ export async function getChatCompletionStreamGemini(
     try {
       const chat = ai.chats.create({
         model: DEFAULT_MODEL,
-        history: conversationHistory.length > 0 ? conversationHistory.slice(0, -1) : []
+        history: conversationHistory
       });
 
       // Prepare the message with system instructions if needed

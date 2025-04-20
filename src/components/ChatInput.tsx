@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Paperclip, X, Image, Loader2, FileText, Square, FileImage, Plus, Maximize, MinusCircle, Eye, HelpCircle, Music, Mic, MicOff } from 'lucide-react';
+import { Send, Paperclip, X, Image, Loader2, FileText, Square, FileImage, Plus, Maximize, MinusCircle, Eye, HelpCircle, Music, Mic, MicOff, Video } from 'lucide-react';
 import { Button } from './ui/Button';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
@@ -38,6 +38,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
   const [fileUploading, setFileUploading] = useState(false);
   const [fileUploadingName, setFileUploadingName] = useState('');
   const [useVisionAnalysis, setUseVisionAnalysis] = useState(true);
@@ -178,6 +179,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     }
     if (audioInputRef.current) {
       audioInputRef.current.value = '';
+    }
+    if (videoInputRef.current) {
+      videoInputRef.current.value = '';
     }
   };
 
@@ -660,6 +664,17 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               <Music className="h-4 w-4" />
               <span>Audio</span>
             </Button>
+            <Button 
+              onClick={() => {
+                videoInputRef.current?.click();
+                setShowAttachmentOptions(false);
+              }}
+              variant="ghost"
+              className="flex items-center justify-start gap-2 h-9 px-3 hover:bg-background"
+            >
+              <Video className="h-4 w-4" />
+              <span>Video</span>
+            </Button>
           </div>
         </div>
       )}
@@ -684,6 +699,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         className="hidden"
         onChange={handleFileSelect}
         accept="audio/*"
+      />
+      <input
+        ref={videoInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleFileSelect}
+        accept="video/*"
       />
     </div>
   );

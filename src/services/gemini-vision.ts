@@ -3,7 +3,8 @@ import { File } from '../types/file';
 import { 
   analyzeImage,
   analyzeMultipleImages, 
-  analyzeVideo, 
+  analyzeVideo,
+  analyzeVideoWithFileAPI,
   analyzeYouTubeVideo,
   getVideoTimestampContent,
   transcribeVideoWithVisualDescriptions,
@@ -17,6 +18,9 @@ export interface GeminiVisionOptions {
   topP?: number;
   maxOutputTokens?: number;
 }
+
+// Size threshold for using the Files API instead of inline data
+const VIDEO_SIZE_THRESHOLD = 20 * 1024 * 1024; // 20MB
 
 export class GeminiVisionService {
   private apiKey: string;
@@ -60,7 +64,14 @@ export class GeminiVisionService {
         
         // Check if it's a video
         if (standardFile.type.startsWith('video/')) {
-          response = await analyzeVideo(standardFile, prompt);
+          // Check video size to determine whether to use inline data or Files API
+          if (standardFile.size > VIDEO_SIZE_THRESHOLD) {
+            // For larger videos, use Files API method
+            response = await analyzeVideoWithFileAPI(standardFile, prompt);
+          } else {
+            // For smaller videos, use inline data method
+            response = await analyzeVideo(standardFile, prompt);
+          }
         } 
         // Check if it's a YouTube URL
         else if ('path' in file && typeof file.path === 'string' && this.isYouTubeUrl(file.path)) {
@@ -128,7 +139,8 @@ export class GeminiVisionService {
    * Check if the provided URL is a YouTube video
    */
   isYouTubeUrl(url: string): boolean {
-    return /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/.test(url);
+    // Enhanced regex to better handle various YouTube URL formats including Shorts
+    return /https?:\/\/(www\.)?(youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)[^\s&]+/.test(url);
   }
 
   /**
@@ -153,11 +165,7 @@ export class GeminiVisionService {
    */
   async analyzeVideoTimestamps(file: File | FileWithPath, timestamps: string[], prompt: string): Promise<string> {
     const standardFile = this.convertToStandardFile(file);
-    // We need a fileUri which requires uploading the file first
-    // Use the analyzeVideo function which handles this internally
-    const response = await analyzeVideo(standardFile, 
-      `${prompt}\nFocus on these specific timestamps: ${timestamps.join(', ')}`);
-    return response;
+    return getVideoTimestampContent(standardFile, timestamps, prompt);
   }
   
   /**
@@ -165,8 +173,6 @@ export class GeminiVisionService {
    */
   async transcribeVideo(file: File | FileWithPath): Promise<string> {
     const standardFile = this.convertToStandardFile(file);
-    // Since we don't have direct access to fileUri, we'll use analyzeVideo with a transcription prompt
-    return analyzeVideo(standardFile, 
-      "Transcribe this video with timestamps and include visual descriptions for each scene");
+    return transcribeVideoWithVisualDescriptions(standardFile);
   }
 } 

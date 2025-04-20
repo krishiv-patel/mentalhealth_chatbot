@@ -1,7 +1,7 @@
 // Global constants for the application
 
 // Gemini model name
-export const GEMINI_MODEL = 'gemini-1.5-pro';
+export const GEMINI_MODEL = 'gemini-2.0-flash';
 
 // Default model to use when not specified
 export const DEFAULT_MODEL = GEMINI_MODEL;

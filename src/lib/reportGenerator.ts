@@ -961,43 +961,50 @@ export async function downloadReport(html: string, filename: string, phoneNumber
   const hardcodedNumber = '+918799399723';
   
   try {
-    // Send SMS notification
-    console.log('Sending SMS notification...');
-    await sendSmsNotification(hardcodedNumber, `Your MindfulAI chat report "${filename}" has been generated and downloaded successfully.`);
-    console.log('SMS notification sent successfully to', hardcodedNumber);
-
-    // Send email notification if email is provided
-    if (userEmail) {
-      console.log('Sending email notification to:', userEmail);
-      await sendEmailNotification(
-        userEmail,
-        'Your MindfulAI Chat Report is Ready',
-        `<p>Your chat report "${filename}" has been generated and downloaded successfully.</p>
-         <p>Thank you for using MindfulAI!</p>`
-      );
-      console.log('Email notification sent successfully');
-    } else {
-      console.log('No user email provided, skipping email notification');
-    }
-  } catch (error) {
-    console.error('Failed to send notifications:', error);
-    // Retry once in case of failure
-    try {
-      console.log('Retrying notifications...');
-      await sendSmsNotification(hardcodedNumber, `Your MindfulAI chat report is ready. Filename: "${filename}"`);
+    console.log('Download complete, sending notifications...');
+    
+    // Handle notifications in a truly asynchronous manner
+    // Use void to explicitly ignore the Promise
+    void (async () => {
+      console.log('Starting asynchronous notification process');
+      
+      // Send email notification if email is provided
       if (userEmail) {
-        console.log('Retrying email notification...');
-        await sendEmailNotification(
-          userEmail,
-          'Your MindfulAI Chat Report is Ready',
-          `<p>Your chat report "${filename}" has been generated and downloaded successfully.</p>
-           <p>Thank you for using MindfulAI!</p>`
-        );
+        console.log('Attempting to send email notification to:', userEmail);
+        
+        try {
+          console.log('Sending email notification');
+          const emailResult = await sendEmailNotification(
+            userEmail,
+            'Your MindfulAI Chat Report is Ready',
+            `<p>Your chat report "${filename}" has been generated and downloaded successfully.</p>
+             <p>Thank you for using MindfulAI!</p>`
+          );
+          console.log('Email notification result:', emailResult);
+        } catch (emailError) {
+          console.error('Email notification failed, but continuing with SMS:', emailError);
+        }
+      } else {
+        console.log('No user email provided, skipping email notification');
       }
-      console.log('Notification retry successful');
-    } catch (retryError) {
-      console.error('Notification retry failed:', retryError);
-    }
+      
+      // Try SMS notification
+      try {
+        console.log('Sending SMS notification...');
+        await sendSmsNotification(hardcodedNumber, `Your MindfulAI chat report "${filename}" has been generated and downloaded successfully.`);
+        console.log('SMS notification sent successfully to', hardcodedNumber);
+      } catch (smsError) {
+        console.error('SMS notification failed:', smsError);
+      }
+      
+      console.log('Notification process completed');
+    })();
+    
+    // Return immediately to keep the UI responsive
+    return true;
+  } catch (error) {
+    console.error('Error in download process:', error);
+    return false;
   }
 }
 
